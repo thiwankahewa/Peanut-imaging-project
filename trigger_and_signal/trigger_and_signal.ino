@@ -1,9 +1,9 @@
-const int triggerPin = 2;   // Arduino output to camera trigger
-const int signalPin  = 3;   // Camera output (exposure done / frame ready)
+const int triggerPin = 2;  // Arduino output to camera trigger
+const int signalPin = 3;   // Camera output (exposure done / frame ready)
 
-const int redLed    = 4;
-const int greenLed  = 5;
-const int blueLed   = 6;
+const int redLed = 4;
+const int greenLed = 5;
+const int blueLed = 6;
 
 
 unsigned long lastTime = 0;
@@ -14,7 +14,7 @@ void setup() {
   pinMode(triggerPin, OUTPUT);
   pinMode(signalPin, INPUT);
 
-  digitalWrite(triggerPin, LOW);   
+  digitalWrite(triggerPin, LOW);
   digitalWrite(redLed, LOW);
   digitalWrite(greenLed, LOW);
   digitalWrite(blueLed, LOW);
@@ -27,10 +27,8 @@ void loop() {
 
     if (input == 'q' || input == 'Q') {
       Serial.println("Triggering camera...");
-      
-      digitalWrite(triggerPin, HIGH);
-      delayMicroseconds(1);
-      digitalWrite(triggerPin, LOW);     // Send trigger pulse
+
+      sendPulse();
 
       frameCount = 0;
       lastTime = 0;
@@ -54,18 +52,25 @@ void loop() {
           Serial.println(" µs");
         }
 
-        if (frameCount == 1) {Serial.println("Red LED ON");}
-        if (frameCount == 3) {Serial.println("Green LED ON");}
-        if (frameCount == 4) {Serial.println("Blue LED ON");}
+        if (frameCount == 1) { Serial.println("Red LED ON"); }
+        if (frameCount == 3) { Serial.println("Green LED ON"); }
+        if (frameCount == 4) { Serial.println("Blue LED ON"); }
 
         lastTime = now;
 
-        while (digitalRead(signalPin) == HIGH);    // Wait until signal goes LOW again
+        while (digitalRead(signalPin) == HIGH)
+          ;  // Wait until signal goes LOW again
 
-        digitalWrite(triggerPin, HIGH);
-        delayMicroseconds(1);
-        digitalWrite(triggerPin, LOW);
+        sendPulse();
       }
 
       Serial.println("Captured 4 frames. Done.");
-    }}}
+    }
+  }
+}
+
+void sendPulse() {
+  digitalWrite(triggerPin, HIGH);
+  delayMicroseconds(1);
+  digitalWrite(triggerPin, LOW);  // Send trigger pulse
+}

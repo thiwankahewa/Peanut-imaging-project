@@ -2,20 +2,15 @@ import PySpin
 import sys
 import time
 
-def configure_exposure(cam):
-    print('*** CONFIGURING EXPOSURE ***\n')
-    
+def configure_camera(cam):
     try:
+        cam.AcquisitionMode.SetValue(PySpin.AcquisitionMode_Continuous)# Set acquisition mode to continuous
+        #cam.AcquisitionFrameRateEnable.SetValue(True)  # Turn on frame rate enable
+        #cam.AcquisitionFrameRate.SetValue(4)  # Set frame rate to 30
+        
         cam.ExposureAuto.SetValue(PySpin.ExposureAuto_Off)  # Turn off automatic exposure mode
         cam.ExposureTime.SetValue(100)
         
-    except PySpin.SpinnakerException as ex:
-        print('Error: %s' % ex)
-    
-def configure_trigger(cam):
-    print('*** CONFIGURING TRIGGER ***\n')
-    
-    try:
         cam.TriggerMode.SetValue(PySpin.TriggerMode_Off)
         cam.TriggerActivation.SetValue(PySpin.TriggerActivation_RisingEdge)
         cam.TriggerSource.SetValue(PySpin.TriggerSource_Line0)
@@ -28,22 +23,15 @@ def configure_trigger(cam):
     except PySpin.SpinnakerException as ex:
         print('Error: %s' % ex)
 
-def acquire_images(cam, nodemap_tldevice):
-    print('*** IMAGE ACQUISITION ***\n')
-    
-    cam.AcquisitionMode.SetValue(PySpin.AcquisitionMode_Continuous)# Set acquisition mode to continuous
+def acquire_images(cam):
     cam.BeginAcquisition()
     
-    device_serial_number = ''
-    node_device_serial_number = PySpin.CStringPtr(nodemap_tldevice.GetNode('DeviceSerialNumber'))
-    if PySpin.IsReadable(node_device_serial_number):
-        device_serial_number = node_device_serial_number.GetValue()  # Retrieve device serial number for logging
-    
+    images = [] 
     processor = PySpin.ImageProcessor()  # Create ImageProcessor instance for post processing images
     #processor.SetColorProcessing(PySpin.SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR)   # Set default image processor color processing method(for color cameras)
     print("Waiting for trigger...")
     
-    for i in range(4):
+    for i in range(10):
         while True:
             try:
                 
@@ -54,8 +42,8 @@ def acquire_images(cam, nodemap_tldevice):
                     continue
 
                 else:
-                    filename = f'Acquisition-{device_serial_number}-{i + 1}.jpg'
-                    image_result.Save(filename)
+                    image_converted = processor.Convert(image_result, PySpin.PixelFormat_Mono8)
+                    images.append(image_converted)
                     image_result.Release()   #  Release image
                     end_time = time.time()
                     time_diff = end_time - start_time
@@ -70,7 +58,12 @@ def acquire_images(cam, nodemap_tldevice):
                 else:
                     print(f"Unexpected error: {ex}")
                     break  
+                
     cam.EndAcquisition()
+    
+    for i, image in enumerate(images):
+        filename = f'cam1-{i+1}.jpg'
+        image.Save(filename)
 
 def main():
     result = True
@@ -82,26 +75,20 @@ def main():
         cam_list.Clear()    # Clear camera list before releasing system
         system.ReleaseInstance()     # Release system instance
         print('Not enough cameras!')
-        input('Done! Press Enter to exit...')
         return False
     
     
-    for i, cam in enumerate(cam_list):
-        nodemap_tldevice = cam.GetTLDeviceNodeMap() #Retrieve TL device nodemap and print device information
+    for i,cam in enumerate(cam_list):
         cam.Init()  #Camera becomes connected
-        nodemap = cam.GetNodeMap()  # Retrieve GenICam nodemap
-        configure_exposure(cam)
-        configure_trigger(cam)
+        configure_camera(cam)
         
-    for i, cam in enumerate(cam_list):
-        acquire_images(cam, nodemap_tldevice) # Acquire images
-        
+    for i,cam in enumerate(cam_list):
+        acquire_images(cam) # Acquire images
         cam.DeInit()  #ensure that devices clean up properly
         
     
     cam_list.Clear()
     system.ReleaseInstance()
-    input('Done! Press Enter to exit...')
     return result
 
 if __name__ == '__main__':

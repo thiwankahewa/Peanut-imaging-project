@@ -1,30 +1,26 @@
 import PySpin
 import sys
 import time
+import numpy as np
 
-def configure_exposure(cam):
-    print('*** CONFIGURING EXPOSURE ***\n')
-    
+exposure_time = [3000, 100]
+
+def configure_exposure(cam, exposure_time):
     try:
         cam.ExposureAuto.SetValue(PySpin.ExposureAuto_Off)  # Turn off automatic exposure mode
-        cam.ExposureTime.SetValue(100)
+        cam.ExposureTime.SetValue(exposure_time) 
         
     except PySpin.SpinnakerException as ex:
         print('Error: %s' % ex)
     
 def configure_trigger(cam):
-    print('*** CONFIGURING TRIGGER ***\n')
-    
     try:
         cam.TriggerMode.SetValue(PySpin.TriggerMode_Off)
-
-        
+      
     except PySpin.SpinnakerException as ex:
         print('Error: %s' % ex)
 
 def acquire_images(cam, nodemap_tldevice):
-    print('*** IMAGE ACQUISITION ***\n')
-    
     cam.AcquisitionMode.SetValue(PySpin.AcquisitionMode_Continuous)# Set acquisition mode to continuous
     cam.BeginAcquisition()
     
@@ -36,34 +32,41 @@ def acquire_images(cam, nodemap_tldevice):
     processor = PySpin.ImageProcessor()  # Create ImageProcessor instance for post processing images
     #processor.SetColorProcessing(PySpin.SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR)   # Set default image processor color processing method(for color cameras)
     
+    images = [] 
+    
     for i in range(4):
-        while True:
-            try:
-                
-                start_time = time.time()
-                image_result = cam.GetNextImage(1000)  #  Retrieve next received image
-                if image_result.IsIncomplete():
-                    print('Image incomplete with image status %d ...' % image_result.GetImageStatus())   #  Ensure image completion
-                    continue
+        try:
+            
+            start_time = time.time()
+            image_result = cam.GetNextImage(1000)  #  Retrieve next received image
+            if image_result.IsIncomplete():
+                print('Image incomplete with image status %d ...' % image_result.GetImageStatus())   #  Ensure image completion
+                continue
 
-                else:
-                    filename = f'Acquisition-{device_serial_number}-{i + 1}.jpg'
-                    image_result.Save(filename)
-                    image_result.Release()   #  Release image
-                    end_time = time.time()
-                    time_diff = end_time - start_time
-                    print(f'Time difference for image acquisition: {time_diff:.6f} seconds, Image count: {i + 1}')
-                    cam.TriggerMode.SetValue(PySpin.TriggerMode_Off)
-                    break
-                    
-            except PySpin.SpinnakerException as ex:
-                if "[-1011]" in str(ex):  # timeout / buffer error
-                    print(f"Timeout waiting for image......")
-                    continue  
-                else:
-                    print(f"Unexpected error: {ex}")
-                    break  
+            else:
+                image_converted = processor.Convert(image_result, PySpin.PixelFormat_Mono8)
+                images.append(image_converted)
+                end_time = time.time()
+                time_diff = end_time - start_time
+                print(f'Time difference for image acquisition: {time_diff:.6f} seconds, Image count: {i + 1}')
+                image_result.Release()
+                
+        except PySpin.SpinnakerException as ex:
+            if "[-1011]" in str(ex):  # timeout / buffer error
+                print(f"Timeout waiting for image......")
+                continue  
+            else:
+                print(f"Unexpected error: {ex}")
+                break  
+            
     cam.EndAcquisition()
+    
+    for i, image in enumerate(images):
+        filename = f'Acquisition-{device_serial_number}-{i+1}.jpg'
+        image.Save(filename)
+
+        
+    
 
 def main():
     result = True
@@ -78,15 +81,16 @@ def main():
         input('Done! Press Enter to exit...')
         return False
     
-    
+    nodemap_list = []
     for i, cam in enumerate(cam_list):
         nodemap_tldevice = cam.GetTLDeviceNodeMap() #Retrieve TL device nodemap and print device information
+        nodemap_list.append(nodemap_tldevice)
         cam.Init()  #Camera becomes connected
-        configure_exposure(cam)
+        configure_exposure(cam, exposure_time[i])
         configure_trigger(cam)
         
     for i, cam in enumerate(cam_list):
-        acquire_images(cam, nodemap_tldevice) # Acquire images
+        acquire_images(cam, nodemap_list[i]) # Acquire images
         
         cam.DeInit()  #ensure that devices clean up properly
         
