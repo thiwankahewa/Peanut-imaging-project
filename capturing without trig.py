@@ -13,7 +13,7 @@ def configure_exposure(cam, exposure_time):
     except PySpin.SpinnakerException as ex:
         print('Error: %s' % ex)
     
-def configure_trigger(cam):
+def configure_trigger(cam):                   #turn off the trigger
     try:
         cam.TriggerMode.SetValue(PySpin.TriggerMode_Off)
       
