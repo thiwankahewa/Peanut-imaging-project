@@ -51,9 +51,10 @@ gain.SetValue(0.0)
 # --- Helper: capture one image ---
 def capture_image(name):
     cam.BeginAcquisition()
+    processor = PySpin.ImageProcessor()
     img = cam.GetNextImage(1000)
     if not img.IsIncomplete():
-        arr = img.Convert(PySpin.PixelFormat_Mono8, PySpin.DIRECTIONAL_FILTER).GetNDArray()
+        arr = processor.Convert(img, PySpin.PixelFormat_Mono8).GetNDArray()
         cv2.imwrite(name, arr)
         print(f"[✓] Saved {name}")
     else:
@@ -67,10 +68,10 @@ try:
     for i, led in leds:
         print(f"--> Capturing LED {i}")
         driver.on()
-        time.sleep(0.1)
+        time.sleep(0.2)
 
         led.on()
-        time.sleep(0.3)  # stabilize lighting
+        time.sleep(1)  # stabilize lighting
 
         filename = f"image_LED{i}.png"
         capture_image(filename)
