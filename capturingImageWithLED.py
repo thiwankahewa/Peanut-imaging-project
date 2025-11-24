@@ -4,6 +4,7 @@ import time
 import cv2
 import PySpin
 from gpiozero import OutputDevice
+from datetime import datetime
 
 # Force a working backend (lgpio or pigpio)
 os.environ["GPIOZERO_PIN_FACTORY"] = "lgpio"   # or "pigpio" if preferred
@@ -48,6 +49,10 @@ exp_time.SetValue(5000)  # microseconds
 gain = PySpin.CFloatPtr(nodemap.GetNode("Gain"))
 gain.SetValue(0.0)
 
+# --- Capture directory ---
+CAPTURE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "captures")
+os.makedirs(CAPTURE_DIR, exist_ok=True)
+
 # --- Helper: capture one image ---
 def capture_image(name):
     cam.BeginAcquisition()
@@ -73,7 +78,8 @@ try:
         led.on()
         time.sleep(1)  # stabilize lighting
 
-        filename = f"image_LED{i}.png"
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        filename = os.path.join(CAPTURE_DIR, f"image_LED{i}_{timestamp}.png")
         capture_image(filename)
 
         led.off()
