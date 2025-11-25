@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Peanut Imaging GUI
+Exec=/home/thiwa/Desktop/Peanut-imaging-project/run_peanut_gui.sh
+Terminal=false
+X-GNOME-Autostart-enabled=true
