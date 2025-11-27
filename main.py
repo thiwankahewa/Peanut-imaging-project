@@ -3,16 +3,27 @@ import os
 import platform
 import time
 import threading
-
 import cv2
 import PySpin
-from gpiozero import OutputDevice
-
 import tkinter as tk
 from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 
+if platform.system() == "Linux":
+    from gpiozero import OutputDevice
+else:
+    # Fake OutputDevice for Windows so code doesn't crash
+    class OutputDevice:
+        def __init__(self, *args, **kwargs):
+            print("[MOCK] OutputDevice created (Windows)")
+        def on(self):  print("[MOCK] ON")
+        def off(self): print("[MOCK] OFF")
 
+
+print(platform.system())
+print(platform.release())
+print(platform.version())
+print(platform.platform())
 # ============================================================
 #  CONFIG
 # ============================================================
@@ -21,7 +32,7 @@ from PIL import Image, ImageTk
 IMAGE_DIR = "images"
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
-if "microsoft" in platform.release().lower():
+if "windows" in platform.system().lower():
     os.environ["GPIOZERO_PIN_FACTORY"] = "mock"
 else:
     os.environ["GPIOZERO_PIN_FACTORY"] = "rpigpio"   # Force a working GPIO backend (must be set before creating OutputDevice)
@@ -33,8 +44,8 @@ LED2_PIN   = 22
 LED3_PIN   = 23
 
 # Exposure / gain settings
-EXPOSURE_US = 12500.0  # microseconds
-GAIN_DB     = 33.0
+EXPOSURE_US = 17000  # microseconds
+GAIN_DB     = 46
 
 
 # ============================================================
@@ -199,7 +210,7 @@ class PeanutApp(tk.Tk):
 
         self.title("Peanut Imaging Box")
 
-        if "microsoft" in platform.release().lower():
+        if "windows" in platform.system().lower():
             self.geometry("800x480")
             self.resizable(False, False)
         else:

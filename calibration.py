@@ -4,10 +4,18 @@ import time
 import cv2
 import numpy as np
 import PySpin
-from gpiozero import OutputDevice
+import platform
 from datetime import datetime
 
-# Force a working backend (lgpio or pigpio)
+if platform.system() == "Linux":
+    from gpiozero import OutputDevice
+else:
+    class OutputDevice:
+        def __init__(self, *args, **kwargs):
+            print("[MOCK] OutputDevice created (Windows)")
+        def on(self):  print("[MOCK] ON")
+        def off(self): print("[MOCK] OFF")
+
 os.environ["GPIOZERO_PIN_FACTORY"] = "lgpio"   # or "pigpio" if preferred
 
 # --- Relay pin definitions (BCM) ---
@@ -34,61 +42,48 @@ if cam_list.GetSize() == 0:
 cam = cam_list.GetByIndex(0)
 cam.Init()
 
-nodemap = cam.GetNodeMap()
+cam.ExposureAuto.SetValue(PySpin.ExposureAuto_Off)
+cam.ExposureTime.SetValue(17800.0)  # microseconds
+cam.GainAuto.SetValue(PySpin.GainAuto_Off)
+cam.Gain.SetValue(46.6)
+cam.PixelFormat.SetValue(PySpin.PixelFormat_Mono16)
 
-# Disable auto exposure and gain
-exp_auto = PySpin.CEnumerationPtr(nodemap.GetNode("ExposureAuto"))
-exp_auto_off = exp_auto.GetEntryByName("Off")
-exp_auto.SetIntValue(exp_auto_off.GetValue())
+EXP_MIN =  cam.ExposureTime.GetMin()
+EXP_MAX =  cam.ExposureTime.GetMax()
+GAIN_MIN = cam.Gain.GetMin()    
+GAIN_MAX = cam.Gain.GetMax()
 
-gain_auto = PySpin.CEnumerationPtr(nodemap.GetNode("GainAuto"))
-gain_auto_off = gain_auto.GetEntryByName("Off")
-gain_auto.SetIntValue(gain_auto_off.GetValue())
-
-# Manual exposure/gain nodes
-exp_time_node = PySpin.CFloatPtr(nodemap.GetNode("ExposureTime"))
-gain_node = PySpin.CFloatPtr(nodemap.GetNode("Gain"))
-
-# Start from some safe defaults
-exp_time_node.SetValue(5000.0)  # microseconds
-gain_node.SetValue(0.0)         # keep gain at 0 for now
-
-EXP_MIN = exp_time_node.GetMin()
-EXP_MAX = exp_time_node.GetMax()
+print(f"Camera exposure range: {EXP_MIN} to {EXP_MAX} us")
+print(f"Camera gain range: {GAIN_MIN} to {GAIN_MAX} dB")
 
 # --- Capture directory ---
 CAPTURE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "captures")
 os.makedirs(CAPTURE_DIR, exist_ok=True)
 
-# --- Reference ROI definitions ---
-# IMPORTANT: UPDATE THESE FOR YOUR IMAGE GEOMETRY.
-# Each ROI is a tuple: (x1, y1, x2, y2)
-# Two white tiles, two black tiles (e.g., in 4 corners but *not* at extreme edges).
+# --- Reference ROI ---
 WHITE_ROIS = [
-    (100, 100, 150, 150),   # top-left white tile (example)
-    (1000, 100, 1050, 150), # top-right white tile (example)
+    (348,950,500,1189),   
+    (1641,199,1836,462), 
 ]
 BLACK_ROIS = [
-    (100, 800, 150, 850),   # bottom-left black tile (example)
-    (1000, 800, 1050, 850), # bottom-right black tile (example)
+    (333,195,511,436),   
+    (1654,921,1821,1173), 
 ]
 
-# QC thresholds (tune these after some runs)
-MAX_VAL = 255.0   # Mono8
-TARGET_WHITE = 180.0   # target mean for white in calibration (0-255)
-TARGET_BLACK = 20.0    # target mean for black in calibration
-WHITE_TOL = 5.0        # +/- range for white during calibration
-DR_MIN = 30.0          # minimum dynamic range (I_white - I_black)
+# QC thresholds 
+MAX_VAL = 65535 #255.0   # Mono16, Mono8
+TARGET_WHITE = 46000 #180.0   # target mean for white in calibration (0-255)
+TARGET_BLACK = 5000 #20.0    # target mean for black in calibration
+WHITE_TOL = 1500 #5.0        # +/- range for white during calibration
+DR_MIN = 8000 #30.0          # minimum dynamic range (I_white - I_black)
 SAT_THRESH = 0.98      # fraction of MAX_VAL considered "too close to saturation"
-STD_WHITE_MAX = 8.0    # if std of white patch > this, warn (dirty/glare)
-STD_BLACK_MAX = 8.0    # if std of black patch > this, warn
-
+STD_WHITE_MAX = 2000 #8.0    # if std of white patch > this, warn (dirty/glare)
+STD_BLACK_MAX = 2000 #8.0    # if std of black patch > this, warn
 DRIFT_FRAC_MAX = 0.10  # 10% drift allowed vs calibration
 
 # --- Helper functions ---
 
 def capture_array():
-    """Capture one image from the camera and return as np.ndarray (Mono8)."""
     cam.BeginAcquisition()
     processor = PySpin.ImageProcessor()
     img = cam.GetNextImage(1000)
@@ -97,7 +92,7 @@ def capture_array():
         img.Release()
         cam.EndAcquisition()
         return None
-    arr = processor.Convert(img, PySpin.PixelFormat_Mono8).GetNDArray()
+    arr = processor.Convert(img, PySpin.PixelFormat_Mono16).GetNDArray()
     img.Release()
     cam.EndAcquisition()
     return arr
@@ -110,7 +105,6 @@ def validate_rois(img_shape):
         if not (0 <= x1 < x2 <= w and 0 <= y1 < y2 <= h):
             raise ValueError(
                 f"ROI {roi} is out of image bounds (w={w}, h={h}). "
-                "Update WHITE_ROIS / BLACK_ROIS to match your tiles."
             )
 
 def roi_stats(img, roi_list):
@@ -119,6 +113,7 @@ def roi_stats(img, roi_list):
     stds = []
     for (x1, y1, x2, y2) in roi_list:
         patch = img[y1:y2, x1:x2]
+        #print(f"ROI {(x1, y1, x2, y2)} -> patch shape {patch.shape}")
         means.append(patch.mean())
         stds.append(patch.std())
     return float(np.mean(means)), float(np.mean(stds))
@@ -184,15 +179,16 @@ def calibrate_led(led_id, led_device):
     """
     print(f"\n=== Calibration for LED {led_id} ===")
     # Simple iterative adjustment of exposure only (gain fixed at 0)
-    exp_us = exp_time_node.GetValue()
+    exp_us = cam.ExposureTime.GetValue()
     print(f"  Starting exposure: {exp_us:.1f} us")
 
-    for iteration in range(12):  # up to 12 iterations
+    for iteration in range(10):  # up to 12 iterations
         driver.on()
         led_device.on()
         time.sleep(0.3)
 
         img = capture_array()
+        print(f"Raw image stats for LED {led_id} ref: min=", img.min(), " max=", img.max(), " mean=", img.mean())
         led_device.off()
         driver.off()
 
@@ -231,27 +227,23 @@ def calibrate_led(led_id, led_device):
 
         # Clamp exposure
         exp_us = max(EXP_MIN, min(EXP_MAX, exp_us))
-        exp_time_node.SetValue(exp_us)
+        cam.ExposureTime.SetValue(exp_us)
 
     print("  -> Calibration loop ended without perfect convergence.")
-    # Return last values anyway
     return exp_us, Iw, Ib
 
 # --- Main LED sequence with calibration + capture ---
 
 try:
     leds = [
-        (1, led1),
-        (2, led2),
-        (3, led3),
+        (1, led1)
     ]
 
     # 1) Calibration phase (NO PEANUTS in tray)
     print("\n=== STEP 1: Calibration ===")
-    print("Make sure ONLY white/black reference tiles are visible (no peanuts).")
     input("Press Enter to start calibration...")
 
-    calibration_results = {}  # led_id -> dict
+    calibration_results = {}  
 
     for led_id, led_dev in leds:
         calib_exp, calib_Iw, calib_Ib = calibrate_led(led_id, led_dev)
@@ -266,21 +258,21 @@ try:
         )
 
     print("\n=== STEP 2: Capture with peanuts ===")
-    print("Now place peanuts on the tray (reference tiles must still be visible).")
     input("Press Enter to capture images...")
 
     for led_id, led_dev in leds:
         print(f"\n--> Capturing LED {led_id}")
         # Use calibrated exposure
-        exp_time_node.SetValue(calibration_results[led_id]["exposure_us"])
-        gain_node.SetValue(0.0)  # still zero; you can make this per-LED if needed
+        cam.ExposureTime.SetValue(calibration_results[led_id]["exposure_us"])
+        cam.Gain.SetValue(46.0)  
 
         driver.on()
-        time.sleep(0.2)
+        time.sleep(0.1)
         led_dev.on()
-        time.sleep(1.0)  # allow lighting to stabilize
+        time.sleep(0.5)  # allow lighting to stabilize
 
         img = capture_array()
+        print(f"Raw image stats for LED {led_id}: min=", img.min(), " max=", img.max(), " mean=", img.mean())
 
         led_dev.off()
         driver.off()
