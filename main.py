@@ -33,8 +33,8 @@ LED2_PIN   = 22
 LED3_PIN   = 23
 
 # Exposure / gain settings
-EXPOSURE_US = 17000.0  # microseconds
-GAIN_DB     = 10.0
+EXPOSURE_US = 12500.0  # microseconds
+GAIN_DB     = 33.0
 
 
 # ============================================================
@@ -84,6 +84,17 @@ def init_camera():
         print("[Init] Got camera at index 0, initializing...")
         cam.Init()
 
+        nodemap = cam.GetNodeMap()
+        pf = PySpin.CEnumerationPtr(nodemap.GetNode("PixelFormat"))
+
+        mono16_entry = pf.GetEntryByName("Mono16")
+        if PySpin.IsAvailable(mono16_entry) and PySpin.IsReadable(mono16_entry):
+            pf.SetIntValue(mono16_entry.GetValue())
+            current = PySpin.CEnumEntryPtr(pf.GetCurrentEntry())
+            print("PixelFormat now:", current.GetSymbolic())
+        else:
+            print("Mono16 not available")
+
         # At this point, camera is usable
         CAM_OK = True
         processor = PySpin.ImageProcessor()
@@ -95,7 +106,6 @@ def init_camera():
         print(f"[Init] Camera init failed with exception: {CAM_ERROR_MSG}")
         return
 
-    # Try to configure nodes, but don't mark camera as dead if this fails
     try:
         nodemap = cam.GetNodeMap()
 
@@ -141,9 +151,11 @@ def capture_image(filepath: str):
     img = cam.GetNextImage(1000)
 
     if not img.IsIncomplete():
-        arr = processor.Convert(img, PySpin.PixelFormat_Mono8).GetNDArray()
+        print(img.GetPixelFormat())
+        print("Source pixel format:", img.GetPixelFormatName()) 
+        arr = processor.Convert(img, PySpin.PixelFormat_Mono16).GetNDArray()
         arr = cv2.rotate(arr, cv2.ROTATE_90_COUNTERCLOCKWISE)
-        #print(f"[Debug] pixel min={arr.min()}, max={arr.max()}, mean={arr.mean():.1f}")
+        print(f"[Debug] pixel min={arr.min()}, max={arr.max()}, mean={arr.mean():.1f}")
         cv2.imwrite(filepath, arr)
         print(f"[✓] Saved {filepath}")
     else:
@@ -584,6 +596,12 @@ class PeanutApp(tk.Tk):
 
         try:
             img = Image.open(filepath)
+
+            if img.mode == "I;16":  
+                import numpy as np
+                arr = np.array(img, dtype=np.uint16)
+                arr8 = (arr / 256).astype("uint8")   # 12-bit/16-bit → 8-bit
+                img = Image.fromarray(arr8, mode="L")
             max_w, max_h = 520, 400  # fits in 800x480 layout
             img.thumbnail((max_w, max_h))
 
