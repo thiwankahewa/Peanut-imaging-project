@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import platform
 import time
 import threading
 
@@ -11,6 +12,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 
+
 # ============================================================
 #  CONFIG
 # ============================================================
@@ -19,8 +21,10 @@ from PIL import Image, ImageTk
 IMAGE_DIR = "images"
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
-# Force a working GPIO backend (must be set before creating OutputDevice)
-os.environ["GPIOZERO_PIN_FACTORY"] = "lgpio"   # or "pigpio"
+if "microsoft" in platform.release().lower():
+    os.environ["GPIOZERO_PIN_FACTORY"] = "mock"
+else:
+    os.environ["GPIOZERO_PIN_FACTORY"] = "rpigpio"   # Force a working GPIO backend (must be set before creating OutputDevice)
 
 # Relay pin definitions (BCM)
 DRIVER_PIN = 17
@@ -182,9 +186,12 @@ class PeanutApp(tk.Tk):
         super().__init__()
 
         self.title("Peanut Imaging Box")
-        #self.geometry("800x480")
-        #self.resizable(False, False)
-        self.attributes("-fullscreen",True)
+
+        if "microsoft" in platform.release().lower():
+            self.geometry("800x480")
+            self.resizable(False, False)
+        else:
+            self.attributes("-fullscreen",True)
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
