@@ -33,7 +33,7 @@ print(platform.platform())
 IMAGE_DIR = "images"
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
-os.environ["GPIOZERO_PIN_FACTORY"] = "rpigpio"   # Force a working GPIO backend (must be set before creating OutputDevice)
+os.environ["GPIOZERO_PIN_FACTORY"] = "lgpio"   # Force a working GPIO backend (must be set before creating OutputDevice)
 
 # Relay pin definitions (BCM)
 DRIVER_PIN = 17
@@ -261,8 +261,7 @@ def calibrate_led(led_id, led_device):
 
         img = capture_image()
         print(f"Raw image stats for LED {led_id} ref: min=", img.min(), " max=", img.max(), " mean=", img.mean())
-        led_device.off()
-        driver.off()
+        
 
         if img is None:
             print("  Failed to capture image during calibration.")
@@ -299,7 +298,9 @@ def calibrate_led(led_id, led_device):
         # Clamp exposure
         exp_us = max(EXP_MIN, min(EXP_MAX, exp_us))
         cam.ExposureTime.SetValue(exp_us)
-
+    led_device.off()
+    driver.off()
+    time.sleep(0.5)
     print("  -> Calibration loop ended without perfect convergence.")
     return exp_us, Iw, Ib
 
@@ -552,6 +553,15 @@ class PeanutApp(tk.Tk):
             command=lambda: self.toggle_led_exclusive(led3, "led3_on", self.led3_btn)
         )
         self.led3_btn.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
+
+        self.led_default_bg = self.led1_btn.cget("bg")
+        self.led_default_fg = self.led1_btn.cget("fg")
+        self.led_default_bg = self.led2_btn.cget("bg")
+        self.led_default_fg = self.led2_btn.cget("fg")
+        self.led_default_bg = self.led3_btn.cget("bg")
+        self.led_default_fg = self.led3_btn.cget("fg")
+
+
         # ---- Camera controls ----
         cam_frame = ttk.LabelFrame(self.tab_settings, text="Camera")
         cam_frame.grid(row=2, column=0, pady=10, padx=40, sticky="ew")
@@ -644,11 +654,11 @@ class PeanutApp(tk.Tk):
 
         # Reset button appearance if buttons already exist
         if hasattr(self, "led1_btn"):
-            self.led1_btn.config(bg="SystemButtonFace", fg="black", text="LED 1")
+            self.led1_btn.config(bg=self.led_default_bg, fg=self.led_default_fg, text="LED 1")
         if hasattr(self, "led2_btn"):
-            self.led2_btn.config(bg="SystemButtonFace", fg="black", text="LED 2")
+            self.led2_btn.config(bg=self.led_default_bg, fg=self.led_default_fg, text="LED 2")
         if hasattr(self, "led3_btn"):
-            self.led3_btn.config(bg="SystemButtonFace", fg="black", text="LED 3")
+            self.led3_btn.config(bg=self.led_default_bg, fg=self.led_default_fg, text="LED 3")
 
         self.set_tabs_for_led_test(False)
 
@@ -766,7 +776,7 @@ class PeanutApp(tk.Tk):
         self.set_status("Calibrating LEDs…")
         self.update_idletasks()
 
-        leds_to_calibrate = [(1, led1)]
+        leds_to_calibrate = [(1, led1),(2, led2),(3, led3)]
         calibration_results = {}
 
         try:
