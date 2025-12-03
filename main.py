@@ -66,14 +66,14 @@ BLACK_ROIS = [
 ]
 
 # QC thresholds 
-MAX_VAL = 65535 #255.0   # Mono16, Mono8
-TARGET_WHITE = 46000 #180.0   # target mean for white in calibration (0-255)
-TARGET_BLACK = 5000 #20.0    # target mean for black in calibration
-WHITE_TOL = 1500 #5.0        # +/- range for white during calibration
-DR_MIN = 8000 #30.0          # minimum dynamic range (I_white - I_black)
+MAX_VAL = 255 #255.0   # Mono16, Mono8
+TARGET_WHITE = 180 #180.0   # target mean for white in calibration (0-255)
+TARGET_BLACK = 20 #20.0    # target mean for black in calibration
+WHITE_TOL = 5 #5.0        # +/- range for white during calibration
+DR_MIN = 30 #30.0          # minimum dynamic range (I_white - I_black)
 SAT_THRESH = 0.98      # fraction of MAX_VAL considered "too close to saturation"
-STD_WHITE_MAX = 2000 #8.0    # if std of white patch > this, warn (dirty/glare)
-STD_BLACK_MAX = 2000 #8.0    # if std of black patch > this, warn
+STD_WHITE_MAX = 8 #8.0    # if std of white patch > this, warn (dirty/glare)
+STD_BLACK_MAX = 8 #8.0    # if std of black patch > this, warn
 DRIFT_FRAC_MAX = 0.10  # 10% drift allowed vs calibration
 
 EXP_MIN = None
@@ -85,7 +85,6 @@ calibration_results = {}
 itertaions = 5
 
 def reset_camera():
-    """Safely de-initialize and release the current camera/system."""
     global CAM_OK, CAM_ERROR_MSG, system, cam_list, cam, processor
 
     if cam is not None:
@@ -121,7 +120,7 @@ def init_camera():
         cam.Init()
         CAM_OK = True
 
-        cam.PixelFormat.SetValue(PySpin.PixelFormat_Mono16)  
+        cam.PixelFormat.SetValue(PySpin.PixelFormat_Mono8)  
         cam.ExposureAuto.SetValue(PySpin.ExposureAuto_Off)
         cam.ExposureTime.SetValue(17800.0)  # microseconds
         cam.GainAuto.SetValue(PySpin.GainAuto_Off)
@@ -164,8 +163,7 @@ def capture_image():
         cam.EndAcquisition()
         return None
 
-    arr = processor.Convert(img, PySpin.PixelFormat_Mono16).GetNDArray()
-    #arr = cv2.rotate(arr, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    arr = processor.Convert(img, PySpin.PixelFormat_Mono8).GetNDArray()
     img.Release()
     cam.EndAcquisition()
     return arr
@@ -260,8 +258,6 @@ def calibrate_led(led_id, led_device):
         time.sleep(0.3)
 
         img = capture_image()
-        print(f"Raw image stats for LED {led_id} ref: min=", img.min(), " max=", img.max(), " mean=", img.mean())
-        
 
         if img is None:
             print("  Failed to capture image during calibration.")
@@ -289,9 +285,10 @@ def calibrate_led(led_id, led_device):
             return exp_us, Iw, Ib
 
         # Decide how to tweak exposure
-        if Iw > TARGET_WHITE or Iw > SAT_THRESH * MAX_VAL:
-            # too bright or near saturation → decrease exposure
+        if Iw > SAT_THRESH * MAX_VAL:
             exp_us *= 0.7
+        elif Iw > TARGET_WHITE:
+            exp_us *= 0.9
         else:
             exp_us *= 1.3
 
@@ -300,7 +297,7 @@ def calibrate_led(led_id, led_device):
         cam.ExposureTime.SetValue(exp_us)
     led_device.off()
     driver.off()
-    time.sleep(0.5)
+    time.sleep(0.3)
     print("  -> Calibration loop ended without perfect convergence.")
     return exp_us, Iw, Ib
 
@@ -702,7 +699,6 @@ class PeanutApp(tk.Tk):
 
     def on_reconnect_camera(self):
         """Try to reinitialize the camera from Settings tab."""
-        global CAM_OK, CAM_ERROR_MSG
 
         if self.is_capturing:
             messagebox.showinfo(
@@ -733,31 +729,27 @@ class PeanutApp(tk.Tk):
 
     def startup_camera_init(self):
         """Run at startup: initialize camera and calibrate LEDs (tray empty)."""
-        global calibration_results
-
         self.set_status("Initializing camera…")
         self.update_idletasks()
 
         init_camera()
-        print(f"[Startup] CAM_OK={CAM_OK}")
 
         if not CAM_OK:
-            self.set_status("Camera not detected - use Settings to reconnect")
             messagebox.showerror(
                 "Camera error",
-                f"Could not initialize camera:\n{CAM_ERROR_MSG}"
+                f"Could not initialize camera:\n{CAM_ERROR_MSG} - check the connection and use Settings to reconnect"
             )
             return
         
         self.set_status("Camera Initialized")
         self.update_idletasks()
+
         self.calibrate_camera()
 
     def calibrate_camera(self):
-        global calibration_results, CAM_OK, CAM_ERROR_MSG
+        global calibration_results
 
         if not CAM_OK:
-            self.set_status("Camera not ready, cannot calibrate.")
             messagebox.showerror(
                 "Camera Error",
                 "Camera is not connected or failed to initialize.\n"
@@ -803,10 +795,6 @@ class PeanutApp(tk.Tk):
             messagebox.showerror("Calibration error", str(e))
 
     def on_start_capture(self):
-        global CAM_OK
-        if self.is_capturing:
-            return
-        
         if not CAM_OK:
             messagebox.showerror(
                 "Camera not ready",
@@ -818,23 +806,15 @@ class PeanutApp(tk.Tk):
         self.start_btn.config(state="disabled")
         self.set_status("Starting capture...")
         self.set_progress(0.0)
+        self.update_idletasks()
 
         self.capture_thread = threading.Thread(target=self.capture_sequence)
         self.capture_thread.daemon = True
         self.capture_thread.start()
 
     def capture_sequence(self):
-        """
-        3-LED capture sequence (runs in background thread).
-        Uses global driver/LEDs + capture_image() function.
-        """
         global calibration_results, CAM_OK, CAM_ERROR_MSG
 
-        if not CAM_OK:
-            self.safe_status("Camera not available")
-            self.safe_capture_end()
-            return
-    
         try:
             leds = [(1, led1), (2, led2), (3, led3)]
             total_steps = len(leds)
@@ -846,24 +826,16 @@ class PeanutApp(tk.Tk):
                     try:
                         cam.ExposureTime.SetValue(calibration_results[i]["exposure_us"])
                     except Exception as e:
-                        # Camera likely unplugged or failed mid-run
                         CAM_OK = False
                         CAM_ERROR_MSG = f"Acquisition error: Setting exposure failed"
                         print("[Camera] Exposure aquisition failed:", CAM_ERROR_MSG)
                         raise RuntimeError(CAM_ERROR_MSG)
     
-                    
-
                 driver.on()
-                time.sleep(0.1)
                 led.on()
-                time.sleep(0.5)#let light stabilize
+                time.sleep(0.3)
 
                 img = capture_image()
-
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
-                filename = f"{i}_{timestamp}_{i}.png"
-                filepath = os.path.join(IMAGE_DIR, filename)
 
                 led.off()
                 driver.off()
