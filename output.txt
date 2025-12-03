@@ -1,0 +1,128 @@
+[Init] Setting up GPIO...
+[Init] Setting up FLIR camera ...
+Camera exposure range: 11.38448715209961 to 17887.353897094727 us
+Camera gain range: 0.0 to 47.994266510009766 dB
+[Init] Camera Init OK
+
+=== Calibration for LED 1 ===
+  Starting exposure: 15004.9 us
+  Iter 0: Iw=255.0, Ib=72.9, std_w=0.0, std_b=18.8, exp=15004.9 us
+  Iter 1: Iw=255.0, Ib=55.7, std_w=0.0, std_b=14.4, exp=10503.4 us
+  Iter 2: Iw=255.0, Ib=43.4, std_w=0.5, std_b=10.7, exp=7352.4 us
+  Iter 3: Iw=248.5, Ib=34.9, std_w=10.8, std_b=7.8, exp=5146.7 us
+  Iter 4: Iw=227.5, Ib=28.8, std_w=19.0, std_b=5.7, exp=3602.7 us
+  Iter 5: Iw=244.5, Ib=33.0, std_w=14.0, std_b=7.2, exp=4683.5 us
+  -> Calibration target reached.
+[LED 1] Calibrated: exp=4683.5 us, Iw=244.5, Ib=33.0
+
+=== Calibration for LED 2 ===
+  Starting exposure: 4682.6 us
+  Iter 0: Iw=185.4, Ib=24.2, std_w=10.6, std_b=3.1, exp=4682.6 us
+  Iter 1: Iw=200.3, Ib=27.0, std_w=13.6, std_b=3.8, exp=6087.4 us
+  Iter 2: Iw=220.0, Ib=30.8, std_w=17.5, std_b=4.7, exp=7913.6 us
+  Iter 3: Iw=239.8, Ib=35.6, std_w=15.9, std_b=6.0, exp=10287.7 us
+  -> Calibration target reached.
+[LED 2] Calibrated: exp=10287.7 us, Iw=239.8, Ib=35.6
+
+=== Calibration for LED 3 ===
+  Starting exposure: 10288.1 us
+  Iter 0: Iw=255.0, Ib=61.1, std_w=0.0, std_b=13.5, exp=10288.1 us
+  Iter 1: Iw=254.1, Ib=47.1, std_w=2.6, std_b=10.2, exp=7201.6 us
+  Iter 2: Iw=228.5, Ib=37.3, std_w=9.6, std_b=7.6, exp=5041.1 us
+  Iter 3: Iw=250.8, Ib=44.1, std_w=6.2, std_b=9.5, exp=6553.5 us
+  Iter 4: Iw=220.1, Ib=35.3, std_w=8.8, std_b=7.1, exp=4587.4 us
+  Iter 5: Iw=244.3, Ib=41.6, std_w=9.2, std_b=8.7, exp=5963.7 us
+  -> Calibration target reached.
+[LED 3] Calibrated: exp=5963.7 us, Iw=244.3, Ib=41.6
+[LED 1] Capture stats: Iw=244.2, Ib=33.0, std_w=14.1, std_b=7.2
+[LED 2] Capture stats: Iw=240.1, Ib=35.7, std_w=15.7, std_b=5.9
+[LED 3] Capture stats: Iw=244.5, Ib=41.7, std_w=9.1, std_b=8.8
+
+
+
+
+
+[Init] Setting up GPIO...
+[Init] Setting up FLIR camera ...
+Camera exposure range: 11.38448715209961 to 17887.353897094727 us
+Camera gain range: 0.0 to 47.994266510009766 dB
+[Init] Camera Init OK
+
+=== Calibration for LED 1 ===
+  Starting exposure: 15004.9 us
+  Iter 0: Iw=255.0, Ib=72.7, std_w=0.0, std_b=18.6, exp=15004.9 us
+  Iter 1: Iw=255.0, Ib=55.6, std_w=0.0, std_b=14.4, exp=10503.4 us
+  Iter 2: Iw=255.0, Ib=43.4, std_w=0.4, std_b=10.7, exp=7352.4 us
+  Iter 3: Iw=248.4, Ib=34.8, std_w=10.8, std_b=7.8, exp=5146.7 us
+  Iter 4: Iw=227.2, Ib=28.7, std_w=19.0, std_b=5.7, exp=3602.7 us
+  Iter 5: Iw=244.3, Ib=33.0, std_w=14.1, std_b=7.2, exp=4683.5 us
+  -> Calibration target reached.
+[LED 1] Calibrated: exp=4683.5 us, Iw=244.3, Ib=33.0
+
+=== Calibration for LED 2 ===
+  Starting exposure: 4682.6 us
+  Iter 0: Iw=185.0, Ib=24.1, std_w=10.6, std_b=3.1, exp=4682.6 us
+  Iter 1: Iw=199.8, Ib=26.9, std_w=13.5, std_b=3.8, exp=6087.4 us
+  Iter 2: Iw=219.2, Ib=30.6, std_w=17.4, std_b=4.7, exp=7913.6 us
+  Iter 3: Iw=239.2, Ib=35.4, std_w=16.1, std_b=5.9, exp=10287.7 us
+  -> Calibration target reached.
+[LED 2] Calibrated: exp=10287.7 us, Iw=239.2, Ib=35.4
+
+=== Calibration for LED 3 ===
+  Starting exposure: 10288.1 us
+  Iter 0: Iw=255.0, Ib=60.7, std_w=0.0, std_b=13.4, exp=10288.1 us
+  Iter 1: Iw=253.9, Ib=46.8, std_w=2.9, std_b=10.1, exp=7201.6 us
+  Iter 2: Iw=227.8, Ib=37.3, std_w=9.5, std_b=7.6, exp=5041.1 us
+  Iter 3: Iw=250.4, Ib=44.0, std_w=6.4, std_b=9.3, exp=6553.5 us
+  Iter 4: Iw=219.4, Ib=35.2, std_w=8.7, std_b=6.9, exp=4587.4 us
+  Iter 5: Iw=243.6, Ib=41.3, std_w=9.3, std_b=8.6, exp=5963.7 us
+  -> Calibration target reached.
+[LED 3] Calibrated: exp=5963.7 us, Iw=243.6, Ib=41.3
+[LED 1] Capture stats: Iw=244.2, Ib=33.0, std_w=14.2, std_b=7.2
+[LED 2] Capture stats: Iw=239.8, Ib=35.6, std_w=15.9, std_b=5.9
+[LED 3] Capture stats: Iw=244.0, Ib=41.4, std_w=9.2, std_b=8.7
+[Cleanup] Releasing hardware...
+
+
+///////////////////////////////////////////////////////////////////////////
+
+[Init] Setting up FLIR camera ...
+Camera exposure range: 11.38448715209961 to 17887.353897094727 us
+Camera gain range: 0.0 to 47.994266510009766 dB
+[Init] Camera Init OK
+
+=== Calibration for LED 1 ===
+  Starting exposure: 1503.9 us
+  Iter 0: Iw=255.0, Ib=31.5, std_w=0.0, std_b=3.7, exp=1503.9 us
+  Iter 1: Iw=250.2, Ib=26.5, std_w=7.9, std_b=2.9, exp=1052.7 us
+  Iter 2: Iw=191.3, Ib=23.1, std_w=16.1, std_b=2.3, exp=736.9 us
+  Iter 3: Iw=239.0, Ib=25.6, std_w=13.9, std_b=2.7, exp=958.0 us
+  -> Calibration target reached.
+[LED 1] Calibrated: exp=958.0 us, Iw=239.0, Ib=25.6
+
+=== Calibration for LED 2 ===
+  Starting exposure: 957.0 us
+  Iter 0: Iw=171.4, Ib=24.8, std_w=13.6, std_b=2.5, exp=957.0 us
+  Iter 1: Iw=216.2, Ib=27.7, std_w=15.5, std_b=3.0, exp=1244.1 us
+  Iter 2: Iw=254.2, Ib=31.5, std_w=2.8, std_b=3.5, exp=1617.4 us
+  Iter 3: Iw=197.7, Ib=26.4, std_w=15.3, std_b=2.8, exp=1132.1 us
+  Iter 4: Iw=246.3, Ib=30.0, std_w=9.9, std_b=3.3, exp=1471.8 us
+  Iter 5: Iw=180.8, Ib=25.3, std_w=14.3, std_b=2.6, exp=1030.3 us
+  Iter 6: Iw=230.5, Ib=28.6, std_w=14.6, std_b=3.1, exp=1339.3 us
+  Iter 7: Iw=255.0, Ib=32.8, std_w=0.4, std_b=3.7, exp=1741.1 us
+  Iter 8: Iw=211.3, Ib=27.4, std_w=15.7, std_b=2.9, exp=1218.8 us
+  Iter 9: Iw=253.2, Ib=31.1, std_w=4.4, std_b=3.5, exp=1584.4 us
+  -> Calibration loop ended without perfect convergence.
+[LED 2] Calibrated: exp=1109.1 us, Iw=253.2, Ib=31.1
+
+=== Calibration for LED 3 ===
+  Starting exposure: 1105.1 us
+  Iter 0: Iw=255.0, Ib=36.5, std_w=0.4, std_b=5.0, exp=1105.1 us
+  Iter 1: Iw=210.4, Ib=30.0, std_w=12.2, std_b=3.7, exp=773.6 us
+  Iter 2: Iw=253.4, Ib=34.4, std_w=4.3, std_b=4.6, exp=1005.7 us
+  Iter 3: Iw=193.3, Ib=28.6, std_w=11.6, std_b=3.5, exp=704.0 us
+  Iter 4: Iw=242.4, Ib=32.6, std_w=10.9, std_b=4.2, exp=915.2 us
+  -> Calibration target reached.
+[LED 3] Calibrated: exp=915.2 us, Iw=242.4, Ib=32.6
+[Cleanup] Releasing hardware...
+[Cleanup] GPIO and camera released.

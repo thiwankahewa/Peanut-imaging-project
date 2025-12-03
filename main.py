@@ -20,11 +20,6 @@ else:
         def on(self):  print("[MOCK] ON")
         def off(self): print("[MOCK] OFF")
 
-
-print(platform.system())
-print(platform.release())
-print(platform.version())
-print(platform.platform())
 # ============================================================
 #  CONFIG
 # ============================================================
@@ -55,19 +50,28 @@ cam_list = None
 cam = None
 processor = None
 
-# --- Reference ROI ---
+'''# --- Reference ROI ---
 WHITE_ROIS = [
-    (348,950,500,1189),   
-    (1641,199,1836,462), 
+    (155,239,300,287),   
+    (1588,1329,1722,1378), 
 ]
 BLACK_ROIS = [
-    (333,195,511,436),   
-    (1654,921,1821,1173), 
+    (1549,210,1663,265),   
+    (171,1378,322,1432), 
+]'''
+
+WHITE_ROIS = [
+    (961,781,1114,840),   
+     (961,781,1114,840), 
+]
+BLACK_ROIS = [
+    (748,792,915,844),   
+    (748,792,915,844), 
 ]
 
 # QC thresholds 
 MAX_VAL = 255 #255.0   # Mono16, Mono8
-TARGET_WHITE = 180 #180.0   # target mean for white in calibration (0-255)
+TARGET_WHITE = 240 #180.0   # target mean for white in calibration (0-255)
 TARGET_BLACK = 20 #20.0    # target mean for black in calibration
 WHITE_TOL = 5 #5.0        # +/- range for white during calibration
 DR_MIN = 30 #30.0          # minimum dynamic range (I_white - I_black)
@@ -82,7 +86,7 @@ GAIN_MIN = None
 GAIN_MAX = None
 
 calibration_results = {}
-itertaions = 5
+itertaions = 10
 
 def reset_camera():
     global CAM_OK, CAM_ERROR_MSG, system, cam_list, cam, processor
@@ -122,9 +126,9 @@ def init_camera():
 
         cam.PixelFormat.SetValue(PySpin.PixelFormat_Mono8)  
         cam.ExposureAuto.SetValue(PySpin.ExposureAuto_Off)
-        cam.ExposureTime.SetValue(17800.0)  # microseconds
+        cam.ExposureTime.SetValue(1500)  # microseconds
         cam.GainAuto.SetValue(PySpin.GainAuto_Off)
-        cam.Gain.SetValue(46.6)
+        cam.Gain.SetValue(25)
         processor = PySpin.ImageProcessor()
 
         EXP_MIN =  cam.ExposureTime.GetMin()
@@ -279,16 +283,14 @@ def calibrate_led(led_id, led_device):
         if (
             abs(Iw - TARGET_WHITE) <= WHITE_TOL
             and dyn_range >= DR_MIN
-            and Iw < SAT_THRESH * MAX_VAL
         ):
             print("  -> Calibration target reached.")
+            led_device.off()
+            driver.off()
             return exp_us, Iw, Ib
 
-        # Decide how to tweak exposure
-        if Iw > SAT_THRESH * MAX_VAL:
+        if Iw > TARGET_WHITE:
             exp_us *= 0.7
-        elif Iw > TARGET_WHITE:
-            exp_us *= 0.9
         else:
             exp_us *= 1.3
 
@@ -893,9 +895,6 @@ class PeanutApp(tk.Tk):
 
                 cv2.imwrite(raw_name, img)          # 16-bit PNG
                 cv2.imwrite(norm_name, img_norm_8u) # 8-bit PNG
-
-                print(f"[LED {i}] Saved raw -> {raw_name}")
-                print(f"[LED {i}] Saved normalized -> {norm_name}")
 
                 progress = idx / total_steps * 100.0
                 self.safe_progress(progress)
