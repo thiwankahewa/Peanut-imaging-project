@@ -13,7 +13,7 @@ import numpy as np
 if platform.system() == "Linux":
     from gpiozero import OutputDevice
 else:
-    # Fake OutputDevice for Windows so code doesn't crash
+    # Fake OutputDevice for Windows 
     class OutputDevice:
         def __init__(self, *args, **kwargs):
             print("[MOCK] OutputDevice created (Windows)")
@@ -27,8 +27,10 @@ else:
 # Directory to save images
 IMAGE_DIR = "images"
 os.makedirs(IMAGE_DIR, exist_ok=True)
+CALIB_DIR = "calibration"
+os.makedirs(CALIB_DIR, exist_ok=True)
 
-os.environ["GPIOZERO_PIN_FACTORY"] = "lgpio"   # Force a working GPIO backend (must be set before creating OutputDevice)
+os.environ["GPIOZERO_PIN_FACTORY"] = "lgpio"   # Force a working GPIO backend 
 
 # Relay pin definitions (BCM)
 DRIVER_PIN = 17
@@ -50,43 +52,14 @@ cam_list = None
 cam = None
 processor = None
 
-'''# --- Reference ROI ---
-WHITE_ROIS = [
-    (155,239,300,287),   
-    (1588,1329,1722,1378), 
-]
-BLACK_ROIS = [
-    (1549,210,1663,265),   
-    (171,1378,322,1432), 
-]'''
+TRAY_ROI = (151,234,1759,1285)
+DOOR_ROI = (1643, 1237, 1753, 1343)
+DOOR_MARKER_ID = 0
+DOOR_MIN_AREA = 2000
 
-WHITE_ROIS = [
-    (961,781,1114,840),   
-     (961,781,1114,840), 
-]
-BLACK_ROIS = [
-    (748,792,915,844),   
-    (748,792,915,844), 
-]
-
-# QC thresholds 
-MAX_VAL = 255 #255.0   # Mono16, Mono8
-TARGET_WHITE = 240 #180.0   # target mean for white in calibration (0-255)
-TARGET_BLACK = 20 #20.0    # target mean for black in calibration
-WHITE_TOL = 5 #5.0        # +/- range for white during calibration
-DR_MIN = 30 #30.0          # minimum dynamic range (I_white - I_black)
-SAT_THRESH = 0.98      # fraction of MAX_VAL considered "too close to saturation"
-STD_WHITE_MAX = 8 #8.0    # if std of white patch > this, warn (dirty/glare)
-STD_BLACK_MAX = 8 #8.0    # if std of black patch > this, warn
-DRIFT_FRAC_MAX = 0.10  # 10% drift allowed vs calibration
-
-EXP_MIN = None
-EXP_MAX = None
-GAIN_MIN = None
-GAIN_MAX = None
-
-calibration_results = {}
-itertaions = 10
+LED_EXPOSURE_US = {1: 17500.0, 2: 17500.0, 3: 17000.0,}
+LED_GAIN_DB = {1: 8.0, 2: 2.0, 3: 0.0,}
+calibration_flats = {}
 
 def reset_camera():
     global CAM_OK, CAM_ERROR_MSG, system, cam_list, cam, processor
@@ -98,18 +71,15 @@ def reset_camera():
     if system is not None:
         system.ReleaseInstance()
 
-    processor = None
-    CAM_OK = False
-    CAM_ERROR_MSG = ""
-
-def init_camera():
-    print("[Init] Setting up FLIR camera ...")
-
-    global CAM_OK, CAM_ERROR_MSG, system, cam_list, cam, processor, EXP_MAX, EXP_MIN, GAIN_MAX, GAIN_MIN
     CAM_OK = False
     CAM_ERROR_MSG = ""
     system = cam_list = cam = processor = None
 
+def init_camera():
+    print("[Init] Setting up FLIR camera ...")
+
+    global CAM_OK, CAM_ERROR_MSG, system, cam_list, cam, processor
+    
     reset_camera()
 
     try:
@@ -126,18 +96,9 @@ def init_camera():
 
         cam.PixelFormat.SetValue(PySpin.PixelFormat_Mono8)  
         cam.ExposureAuto.SetValue(PySpin.ExposureAuto_Off)
-        cam.ExposureTime.SetValue(1500)  # microseconds
         cam.GainAuto.SetValue(PySpin.GainAuto_Off)
-        cam.Gain.SetValue(25)
         processor = PySpin.ImageProcessor()
 
-        EXP_MIN =  cam.ExposureTime.GetMin()
-        EXP_MAX =  cam.ExposureTime.GetMax()
-        GAIN_MIN = cam.Gain.GetMin()    
-        GAIN_MAX = cam.Gain.GetMax()
-
-        print(f"Camera exposure range: {EXP_MIN} to {EXP_MAX} us")
-        print(f"Camera gain range: {GAIN_MIN} to {GAIN_MAX} dB")
         print("[Init] Camera Init OK")
 
     except Exception as e:
@@ -145,9 +106,55 @@ def init_camera():
         CAM_OK = False
         print(CAM_ERROR_MSG)
         return
+    
+def set_led_camera_params(led_id: int):
+    if cam is None:
+        return
+    exp = LED_EXPOSURE_US.get(led_id, None)
+    gain = LED_GAIN_DB.get(led_id, None)
+    cam.ExposureTime.SetValue(exp)
+    cam.Gain.SetValue(gain)
+
+def is_door_closed(frame_gray: np.ndarray) -> tuple[bool, str]:
+    x1, y1, x2, y2 = DOOR_ROI
+    roi = frame_gray[y1:y2, x1:x2]
+
+    try:
+        aruco = cv2.aruco
+    except AttributeError:
+        return False, "OpenCV ArUco module not available. Install opencv-contrib-python."
+
+    # Choose your dictionary (must match what you printed)
+    dictionary = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
+    params = aruco.DetectorParameters()
+
+    detector = aruco.ArucoDetector(dictionary, params)
+    corners, ids, _ = detector.detectMarkers(roi)
+
+    if ids is None or len(ids) == 0:
+        print("No markers detected")
+        return False, "Door marker not detected. Close the door fully."
+
+    ids = ids.flatten().tolist()
+
+    if DOOR_MARKER_ID is not None and DOOR_MARKER_ID not in ids:
+        print("Wrong marker ID detected:", ids)
+        return False, f"Wrong marker ID detected ({ids}). Expected {DOOR_MARKER_ID}."
+
+    # Choose the marker we care about
+    idx = ids.index(DOOR_MARKER_ID) if DOOR_MARKER_ID in ids else 0
+    c = corners[idx].reshape(-1, 2)
+
+    # Marker area filter (reject tiny / partial)
+    area = cv2.contourArea(c.astype(np.float32))
+    if area < DOOR_MIN_AREA:
+        return False, "Door marker too small/partial. Ensure door is fully closed."
+
+    return True, "Door closed"
 
 def capture_image():
     global CAM_OK, CAM_ERROR_MSG
+    x1, y1, x2, y2 = TRAY_ROI
 
     if not CAM_OK or cam is None or processor is None:
         raise RuntimeError("Camera not initialized")
@@ -170,138 +177,111 @@ def capture_image():
     arr = processor.Convert(img, PySpin.PixelFormat_Mono8).GetNDArray()
     img.Release()
     cam.EndAcquisition()
-    return arr
+    ok, reason = is_door_closed(arr)
+    '''if not ok:
+        return ("DOOR_OPEN", reason)'''
+    return arr[y1:y2, x1:x2]
 
-def validate_rois(img_shape):
-    """Check that ROIs are inside image bounds."""
-    h, w = img_shape[:2]
-    for roi in WHITE_ROIS + BLACK_ROIS:
-        x1, y1, x2, y2 = roi
-        if not (0 <= x1 < x2 <= w and 0 <= y1 < y2 <= h):
-            raise ValueError(
-                f"ROI {roi} is out of image bounds (w={w}, h={h}). "
-            )
-        
-def roi_stats(img, roi_list):
-    """Return mean and std across all pixels in given list of ROIs."""
-    means = []
-    stds = []
-    for (x1, y1, x2, y2) in roi_list:
-        patch = img[y1:y2, x1:x2]
-        #print(f"ROI {(x1, y1, x2, y2)} -> patch shape {patch.shape}")
-        means.append(patch.mean())
-        stds.append(patch.std())
-    return float(np.mean(means)), float(np.mean(stds))
+def flat_field_normalize(img: np.ndarray, led_id: int) -> np.ndarray:
+    """
+    Normalize an image using the latest calibration flat for this LED.
+    N(x,y) = I(x,y) * (mean(flat) / flat(x,y))
+    """
+    cal = calibration_flats.get(led_id, None)
+    if cal is None:
+        #return original
+        return img.copy()
 
-def normalize_with_refs(img, I_white, I_black):
-    """Normalize image to [0,1] using current white/black intensities."""
-    eps = 1e-6
-    gain = 1.0 / max(I_white - I_black, eps)
-    offset = -I_black * gain
-    img_norm = img.astype(np.float32) * gain + offset
-    img_norm = np.clip(img_norm, 0.0, 1.0)
-    return img_norm
+    img = img.astype(np.float32)
+    flat = cal.astype(np.float32)
 
-def apply_qc_and_print(led_id, Iw, Ib, std_w, std_b, cal_Iw, cal_Ib):
-    """Check various QC conditions and print warnings."""
-    dyn_range = Iw - Ib
+    # Avoid divide-by-zero
+    flat_safe = np.where(flat < 1.0, 1.0, flat)
+    flat_mean = flat_safe.mean()
+
+    norm = img * (flat_mean / flat_safe)
+    norm = np.clip(norm, 0, 255).astype("uint8")
+    return norm
+
+def calib_flat_path_latest(led_id: int) -> str:
+    return os.path.join(CALIB_DIR, f"LED{led_id}_flat_latest.npy")
+
+def calib_flat_path_ref(led_id: int) -> str:
+    return os.path.join(CALIB_DIR, f"LED{led_id}_flat_ref.npy")
+
+def load_calibration_flats():
+    global calibration_flats
+    calibration_flats = {}
+    for led_id in (1, 2, 3):
+        path = calib_flat_path_latest(led_id)
+        if os.path.exists(path):
+            try:
+                arr = np.load(path)
+                calibration_flats[led_id] = arr
+                print(f"[Calib] Loaded latest flat for LED {led_id} from {path}")
+            except Exception as e:
+                print(f"[Calib] Failed to load flat for LED {led_id}: {e}")
+
+def save_calibration_flat(led_id: int, arr: np.ndarray, as_reference_if_missing=True):
+    latest_path = calib_flat_path_latest(led_id)
+    np.save(latest_path, arr)
+    print(f"[Calib] Saved latest flat for LED {led_id} -> {latest_path}")
+
+    ref_path = calib_flat_path_ref(led_id)
+    if as_reference_if_missing and not os.path.exists(ref_path):
+        np.save(ref_path, arr)
+        print(f"[Calib] Saved reference flat for LED {led_id} -> {ref_path}")
+
+def compare_to_reference(led_id: int, arr: np.ndarray) -> list[str]:
+    """
+    Compare current calibration arr with reference flat and produce warnings.
+    Returns a list of warning strings (can be empty).
+    """
     warnings = []
-
-    # Drift relative to calibration
-    if cal_Iw > 1e-3:
-        drift_white = abs(Iw - cal_Iw) / cal_Iw
-        if drift_white > DRIFT_FRAC_MAX:
-            warnings.append(
-                f"White drift {drift_white*100:.1f}% vs calibration. "
-                "Lighting/exposure changed."
-            )
-
-    # Saturation
-    if Iw > SAT_THRESH * MAX_VAL:
-        warnings.append("White reference near saturation. Reduce exposure/gain.")
-
-    # Dynamic range too small
-    if dyn_range < DR_MIN:
-        warnings.append(
-            f"Dynamic range too low (Iw - Ib = {dyn_range:.1f}). "
-            "Lighting too weak or references too similar."
-        )
-
-    # Std checks
-    if std_w > STD_WHITE_MAX:
-        warnings.append(
-            f"White patch std {std_w:.1f} too high. "
-            "Tile may be dirty or has glare/shadow."
-        )
-    if std_b > STD_BLACK_MAX:
-        warnings.append(
-            f"Black patch std {std_b:.1f} too high. "
-            "Stray light or contamination on black tile."
-        )
-    
-    return warnings
-
-def calibrate_led(led_id, led_device):
-    global CAM_OK, CAM_ERROR_MSG
-    print(f"\n=== Calibration for LED {led_id} ===")
+    ref_path = calib_flat_path_ref(led_id)
+    if not os.path.exists(ref_path):
+        return warnings
 
     try:
-        exp_us = cam.ExposureTime.GetValue()
+        ref = np.load(ref_path).astype(np.float32)
     except Exception as e:
-        # Camera likely unplugged or failed mid-run
-        CAM_OK = False
-        CAM_ERROR_MSG = f"Acquisition error: {e!r}"
-        print("[Camera] Exposure aquisition failed:", CAM_ERROR_MSG)
-        raise RuntimeError(CAM_ERROR_MSG)
-    
-    print(f"  Starting exposure: {exp_us:.1f} us")
+        warnings.append(f"Could not load reference flat for LED {led_id}: {e}")
+        return warnings
 
-    for iteration in range(itertaions):  # up to 12 iterations
-        driver.on()
-        led_device.on()
-        time.sleep(0.3)
+    cur = arr.astype(np.float32)
 
-        img = capture_image()
+    ref_mean = ref.mean()
+    cur_mean = cur.mean()
+    if ref_mean < 1:
+        return warnings
 
-        if img is None:
-            print("  Failed to capture image during calibration.")
-            continue
+    ratio = cur_mean / ref_mean
 
-        if iteration == 0:
-            validate_rois(img.shape)
-
-        Iw, std_w = roi_stats(img, WHITE_ROIS)
-        Ib, std_b = roi_stats(img, BLACK_ROIS)
-        dyn_range = Iw - Ib
-
-        print(
-            f"  Iter {iteration}: Iw={Iw:.1f}, Ib={Ib:.1f}, "
-            f"std_w={std_w:.1f}, std_b={std_b:.1f}, exp={exp_us:.1f} us"
+    # Global brightness drift
+    if abs(ratio - 1.0) > 0.1:   #10% difference
+        warnings.append(
+            f"LED {led_id}: Mean brightness drift {((ratio-1)*100):.1f}% "
+            "relative to reference. LED output or exposure may have changed."
         )
 
-        # Check if within acceptable calibration range
-        if (
-            abs(Iw - TARGET_WHITE) <= WHITE_TOL
-            and dyn_range >= DR_MIN
-        ):
-            print("  -> Calibration target reached.")
-            led_device.off()
-            driver.off()
-            return exp_us, Iw, Ib
+    # Spatial deviation
+    ref_safe = np.where(ref < 1.0, 1.0, ref)
+    dev = np.abs(cur - ref_safe) / ref_safe
+    mean_dev = dev.mean()
+    max_dev = dev.max()
 
-        if Iw > TARGET_WHITE:
-            exp_us *= 0.7
-        else:
-            exp_us *= 1.3
+    if mean_dev > 0.1:
+        warnings.append(
+            f"LED {led_id}: Average spatial deviation {mean_dev*100:.1f}% "
+            "from reference. Diffuser or LED array may have changed."
+        )
+    if max_dev > 0.25:
+        warnings.append(
+            f"LED {led_id}: Local deviation up to {max_dev*100:.1f}% from reference. "
+            "Check for dirt, damage, or partial LED failure."
+        )
 
-        # Clamp exposure
-        exp_us = max(EXP_MIN, min(EXP_MAX, exp_us))
-        cam.ExposureTime.SetValue(exp_us)
-    led_device.off()
-    driver.off()
-    time.sleep(0.3)
-    print("  -> Calibration loop ended without perfect convergence.")
-    return exp_us, Iw, Ib
+    return warnings
 
 def cleanup_hardware():
     print("[Cleanup] Releasing hardware...")
@@ -730,10 +710,8 @@ class PeanutApp(tk.Tk):
     # =======================================================
 
     def startup_camera_init(self):
-        """Run at startup: initialize camera and calibrate LEDs (tray empty)."""
         self.set_status("Initializing camera…")
         self.update_idletasks()
-
         init_camera()
 
         if not CAM_OK:
@@ -742,14 +720,17 @@ class PeanutApp(tk.Tk):
                 f"Could not initialize camera:\n{CAM_ERROR_MSG} - check the connection and use Settings to reconnect"
             )
             return
-        
-        self.set_status("Camera Initialized")
-        self.update_idletasks()
 
-        self.calibrate_camera()
+        load_calibration_flats()
+        if calibration_flats:
+            self.set_status("Camera initialized (calibration found).")
+            self.start_btn.config(state="normal")
+        else:
+            self.set_status("Camera initialized (no calibration).")
+            self.calibrate_camera()
 
     def calibrate_camera(self):
-        global calibration_results
+        global calibration_flats
 
         if not CAM_OK:
             messagebox.showerror(
@@ -763,34 +744,68 @@ class PeanutApp(tk.Tk):
         self.update_idletasks()
 
         messagebox.showinfo(
-        "Prepare Tray",
-        "Remove peanuts and insert reference tray.\nClick OK to continue."
+            "Prepare White Board",
+            "Remove peanut tray and insert the full-size white calibration board.\n"
+            "Click OK to continue."
         )
         
-        self.set_status("Calibrating LEDs…")
+        self.set_status("Capturing calibration flats…")
         self.update_idletasks()
 
         leds_to_calibrate = [(1, led1),(2, led2),(3, led3)]
-        calibration_results = {}
+        calibration_flats = {}
+        all_warnings = []
 
         try:
             for led_id, led_dev in leds_to_calibrate:
-                calib_exp, calib_Iw, calib_Ib = calibrate_led(led_id, led_dev)
-                calibration_results[led_id] = {
-                    "exposure_us": calib_exp,
-                    "I_white": calib_Iw,
-                    "I_black": calib_Ib,
-                }
-                print(
-                    f"[LED {led_id}] Calibrated: exp={calib_exp:.1f} us, "
-                    f"Iw={calib_Iw:.1f}, Ib={calib_Ib:.1f}"
+                self.set_status(f"Calibrating LED {led_id}…")
+                self.update_idletasks()
+
+                set_led_camera_params(led_id)
+
+                driver.on()
+                led_dev.on()
+                time.sleep(0.3)
+
+                img = capture_image()
+
+                '''if isinstance(img, tuple) and img[0] == "DOOR_OPEN":
+                    reason = img[1]
+                    self.after(0, lambda: messagebox.showwarning("Door Not Closed", reason))
+                    return'''
+
+                led_dev.off()
+                driver.off()
+                time.sleep(0.2)
+
+                if img is None:
+                    all_warnings.append(f"LED {led_id}: Failed to capture calibration image.")
+                    continue
+
+                calibration_flats[led_id] = img
+
+                # Save latest flat and reference if missing
+                save_calibration_flat(led_id, img, as_reference_if_missing=True)
+                calib_raw_name = os.path.join(CALIB_DIR, f"LED{led_id}_CALIB_RAW.png")
+                cv2.imwrite(calib_raw_name, img)
+
+                # Compare to reference and collect warnings
+                w = compare_to_reference(led_id, img)
+                all_warnings.extend(w)
+
+            if all_warnings:
+                msg = "\n\n".join(all_warnings)
+                messagebox.showwarning(
+                    "Calibration Warnings",
+                    msg + "\n\nCheck LEDs, diffuser, and calibration board."
                 )
+
             self.set_status("Ready (calibrated)")
-            messagebox.showinfo(
-                "Camera",
-                "Camera calibrated sucessfully."
-            )
             self.start_btn.config(state="normal")
+            messagebox.showinfo(
+                "Calibration",
+                "Calibration with white board completed."
+            )
 
         except Exception as e:
             self.set_status(f"Calibration error: {e}")
@@ -803,6 +818,20 @@ class PeanutApp(tk.Tk):
                 "Camera not connected. Use Settings → Reconnect Camera."
             )
             return
+        
+        if not calibration_flats:
+            if not messagebox.askokcancel(
+                "No calibration",
+                "No calibration data loaded.\n"
+                "Capture anyway without flat-field correction?"
+            ):
+                return
+            
+        messagebox.showinfo(
+            "Prepare Peanut Tray",
+            "Insert the peanut Tray with peanuts.\n"
+            "Click OK to continue."
+        )
 
         self.is_capturing = True
         self.start_btn.config(state="disabled")
@@ -815,24 +844,13 @@ class PeanutApp(tk.Tk):
         self.capture_thread.start()
 
     def capture_sequence(self):
-        global calibration_results, CAM_OK, CAM_ERROR_MSG
-
         try:
             leds = [(1, led1), (2, led2), (3, led3)]
             total_steps = len(leds)
 
             for idx, (i, led) in enumerate(leds, start=1):
                 self.safe_status(f"Capturing LED {i}...")
-
-                if i in calibration_results:
-                    try:
-                        cam.ExposureTime.SetValue(calibration_results[i]["exposure_us"])
-                    except Exception as e:
-                        CAM_OK = False
-                        CAM_ERROR_MSG = f"Acquisition error: Setting exposure failed"
-                        print("[Camera] Exposure aquisition failed:", CAM_ERROR_MSG)
-                        raise RuntimeError(CAM_ERROR_MSG)
-    
+                set_led_camera_params(i)
                 driver.on()
                 led.on()
                 time.sleep(0.3)
@@ -847,54 +865,14 @@ class PeanutApp(tk.Tk):
                     print(f"[LED {i}] Failed to capture image.")
                     continue
 
-                Iw, std_w = roi_stats(img, WHITE_ROIS)
-                Ib, std_b = roi_stats(img, BLACK_ROIS)
-
-                print(
-                    f"[LED {i}] Capture stats: Iw={Iw:.1f}, Ib={Ib:.1f}, "
-                    f"std_w={std_w:.1f}, std_b={std_b:.1f}"
-                )
-
-                cal = calibration_results.get(i, None)
-                if cal is not None:
-                    cal_Iw = cal["I_white"]
-                    cal_Ib = cal["I_black"]
-                else:
-                    cal_Iw, cal_Ib = Iw, Ib  # fallback
-
-                warnings = apply_qc_and_print(i, Iw, Ib, std_w, std_b, cal_Iw, cal_Ib)
-
-                if warnings:
-                    full_msg = "\n".join(warnings)
-
-                    # Suggest user actions
-                    suggestion = (
-                        "\n\nSuggestions:\n"
-                        "- Clean the white and black reference tiles.\n"
-                        "- Ensure tray is fully inside and flat.\n"
-                        "- Check for external light leaking into imaging box.\n"
-                        "- Check LEDs for dirt or misalignment.\n"
-                        "- Recalibrate if necessary (Settings → Recalibrate LEDs)."
-                    )
-
-                    full_msg += suggestion
-
-                    # Show pop-up on GUI thread
-                    self.safe_status("QC Warning")
-                    self.after(0, lambda: messagebox.showwarning(
-                        f"QC Warning - LED {i}", full_msg
-                    ))
-
-                # Normalize and save
-                img_norm = normalize_with_refs(img, Iw, Ib)          # 0..1
-                img_norm_8u = (img_norm * 255.0).astype("uint8")     # viewable
+                img_norm = flat_field_normalize(img, i)
 
                 timestamp = time.strftime("%Y%m%d-%H%M%S")
-                raw_name = os.path.join(IMAGE_DIR, f"LED{i}_raw_{timestamp}.png")
-                norm_name = os.path.join(IMAGE_DIR, f"LED{i}_norm_{timestamp}.png")
+                raw_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED{i}_raw_.png")
+                norm_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED{i}_norm.png")
 
-                cv2.imwrite(raw_name, img)          # 16-bit PNG
-                cv2.imwrite(norm_name, img_norm_8u) # 8-bit PNG
+                cv2.imwrite(raw_name, img)         
+                cv2.imwrite(norm_name, img_norm)
 
                 progress = idx / total_steps * 100.0
                 self.safe_progress(progress)
