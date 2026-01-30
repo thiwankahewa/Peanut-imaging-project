@@ -201,8 +201,8 @@ def flat_field_normalize(img: np.ndarray, led_id: int) -> np.ndarray:
     if cal is None:
         return img.copy()
 
-    img = img.astype(np.float32)
-    flat = cal.astype(np.float32)
+    img = img.astype(np.uint8)
+    flat = cal.astype(np.uint8)
 
     # Avoid divide-by-zero
     flat_safe = np.where(flat < 1.0, 1.0, flat)
@@ -211,7 +211,7 @@ def flat_field_normalize(img: np.ndarray, led_id: int) -> np.ndarray:
     norm = img * (flat_mean / flat_safe)
     norm_ratio = img / flat_safe
     norm = np.clip(norm, 0, 255).astype("uint8")
-    return norm, norm_ratio
+    return norm, norm_ratio, 
 
 
 def calib_flat_path_ref(led_id: int) -> str:
@@ -289,6 +289,8 @@ class PeanutApp(tk.Tk):
         # Tk variables
         self.progress_var = tk.DoubleVar(value=0.0)
         self.status_var   = tk.StringVar(value="Idle")
+        self.selected_color = tk.StringVar(value="unlabeled") 
+        self.color_buttons = {} 
 
         self._create_style()
         self._create_widgets()
@@ -365,34 +367,54 @@ class PeanutApp(tk.Tk):
                                pady=(0, 10))
 
         # ------ Right side: Results panel ------
-        right_cap = ttk.LabelFrame(self.tab_capture, text="Latest Results")
+        right_cap = ttk.LabelFrame(self.tab_capture, text="Label (Select Color)")
         right_cap.grid(row=0, column=1, sticky="nsew", padx=(0, 20), pady=20)
         right_cap.columnconfigure(0, weight=1)
-        for r in range(6):
+
+        # Define your label set (add 3 more as you want)
+        colors = ["white", "yellow", "orange", "brown", "black"]
+
+        # Arrange as a grid of buttons (2 columns x 4 rows here)
+        cols = 2
+        for c in range(cols):
+            right_cap.columnconfigure(c, weight=1)
+
+        rows = (len(colors) + cols - 1) // cols
+        for r in range(rows):
             right_cap.rowconfigure(r, weight=1)
 
-        # StringVars for results (placeholders for now)
-        self.total_var  = tk.StringVar(value="Total peanuts: -")
-        self.black_var  = tk.StringVar(value="Black: -")
-        self.brown_var  = tk.StringVar(value="Brown: -")
-        self.yellow_var = tk.StringVar(value="Yellow: -")
-        self.white_var  = tk.StringVar(value="White: -")
+        def on_pick_color(name: str):
+            self.selected_color.set(name)
+            self.set_status(f"Selected label: {name}")
 
-        ttk.Label(right_cap, textvariable=self.total_var).grid(
-            row=0, column=0, sticky="w", padx=10, pady=2
+            for cname, btn in self.color_buttons.items():
+                if cname == name:
+                    btn.config(relief="sunken", font=("Helvetica", 14, "bold"))
+                else:
+                    btn.config(relief="raised", font=("Helvetica", 14))
+
+        # Create buttons
+        for idx, name in enumerate(colors):
+            r = idx // cols
+            c = idx % cols
+            btn = tk.Button(
+                right_cap,
+                text=name.upper(),
+                font=("Helvetica", 14),
+                relief="raised",
+                bd=2,
+                command=lambda n=name: on_pick_color(n)
+            )
+            btn.grid(row=r, column=c, padx=8, pady=8, sticky="nsew")
+            self.color_buttons[name] = btn
+
+        # Show current selection
+        sel_lbl = ttk.Label(
+            right_cap,
+            textvariable=self.selected_color,
+            font=("Helvetica", 12, "italic")
         )
-        ttk.Label(right_cap, textvariable=self.black_var).grid(
-            row=1, column=0, sticky="w", padx=10, pady=2
-        )
-        ttk.Label(right_cap, textvariable=self.brown_var).grid(
-            row=2, column=0, sticky="w", padx=10, pady=2
-        )
-        ttk.Label(right_cap, textvariable=self.yellow_var).grid(
-            row=3, column=0, sticky="w", padx=10, pady=2
-        )
-        ttk.Label(right_cap, textvariable=self.white_var).grid(
-            row=4, column=0, sticky="w", padx=10, pady=2
-        )
+        sel_lbl.grid(row=rows, column=0, columnspan=cols, pady=(10, 0))
 
         # ==== Gallery tab ====
         self.tab_gallery = ttk.Frame(notebook)
@@ -768,7 +790,11 @@ class PeanutApp(tk.Tk):
                 "Capture anyway without flat-field correction?"
             ):
                 return
-            
+        
+        if self.selected_color.get() == "unlabeled":
+            messagebox.showwarning("Label Required", "Please select a peanut color label before capture.")
+            return
+
         messagebox.showinfo(
             "Prepare Peanut Tray",
             "Insert the peanut Tray with peanuts.\n"
@@ -789,6 +815,9 @@ class PeanutApp(tk.Tk):
         try:
             leds = [(1, led1), (2, led2), (3, led3)]
             total_steps = len(leds)
+            band_imgs = {}
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
+            label = self.selected_color.get().strip().lower() or "unlabeled"
 
             for idx, (i, led) in enumerate(leds, start=1):
                 self.safe_status(f"Capturing LED {i}...")
@@ -807,19 +836,27 @@ class PeanutApp(tk.Tk):
                     print(f"[LED {i}] Failed to capture image.")
                     continue
 
-                img_norm, norm_ratio  = flat_field_normalize(img, i)
+                band_imgs[i] = img
 
-                timestamp = time.strftime("%Y%m%d-%H%M%S")
-                raw_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED{i}_raw_.png")
-                norm_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED{i}_norm.png")
-                norm_ratio_name= os.path.join(IMAGE_DIR, f"{timestamp}_LED{i}_ratio.npy")
-                
+                #img_norm, norm_ratio  = flat_field_normalize(img, i)
+
+                raw_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED{i}_{label}_raw_.png")
+                raw_img_npy_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED{i}_{label}_raw.npy")
+                #norm_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED{i}_{label}_norm.png")
+                #norm_ratio_name= os.path.join(IMAGE_DIR, f"{timestamp}_LED{i}_{label}_ratio.npy")
+
                 cv2.imwrite(raw_name, img)         
-                cv2.imwrite(norm_name, img_norm)
-                np.save(norm_ratio_name, norm_ratio.astype(np.float32))
+                #cv2.imwrite(norm_name, img_norm)
+                #np.save(norm_ratio_name, norm_ratio.astype(np.float32))
+                np.save(raw_img_npy_name, img.astype(np.uint8))
 
                 progress = idx / total_steps * 100.0
                 self.safe_progress(progress)
+
+            pseudo = np.dstack([band_imgs[1], band_imgs[2], band_imgs[3]])  # HxWx3, uint8
+            pseudo_name = os.path.join(IMAGE_DIR, f"{timestamp}_{label}_LED123.png")
+            cv2.imwrite(pseudo_name, pseudo)
+
 
             self.safe_status("Capture complete.")
             self.safe_refresh_gallery()
