@@ -37,13 +37,15 @@ DRIVER_PIN = 17
 LED1_PIN   = 27
 LED2_PIN   = 22
 LED3_PIN   = 23
+LED4_PIN   = 24
 
 # --- Initialize relays (active-LOW: LOW = ON, HIGH = OFF) ---
 print("[Init] Setting up GPIO...")
-driver = OutputDevice(DRIVER_PIN, active_high=False, initial_value=False)
-led1   = OutputDevice(LED1_PIN,   active_high=False, initial_value=False)
-led2   = OutputDevice(LED2_PIN,   active_high=False, initial_value=False)
-led3   = OutputDevice(LED3_PIN,   active_high=False, initial_value=False)
+driver = OutputDevice(DRIVER_PIN, active_high=True, initial_value=False)
+led1   = OutputDevice(LED1_PIN,   active_high=True, initial_value=False)
+led2   = OutputDevice(LED2_PIN,   active_high=True, initial_value=False)
+led3   = OutputDevice(LED3_PIN,   active_high=True, initial_value=False)
+led4   = OutputDevice(LED4_PIN,   active_high=True, initial_value=False)
 
 CAM_OK = False
 CAM_ERROR_MSG = ""
@@ -453,7 +455,7 @@ class PeanutApp(tk.Tk):
         # ---- Manual LED test buttons ----
         leds_frame = ttk.LabelFrame(self.tab_settings, text="Manual LED Test")
         leds_frame.grid(row=1, column=0, pady=10, padx=40, sticky="ew")
-        for c in range(3):
+        for c in range(4):
             leds_frame.columnconfigure(c, weight=1)
 
         self.led1_btn = tk.Button(
@@ -486,12 +488,24 @@ class PeanutApp(tk.Tk):
         )
         self.led3_btn.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
 
+        self.led4_btn = tk.Button(
+            leds_frame,
+            text="LED 4",
+            font=("Helvetica", 12),
+            relief="raised",
+            bd=2,
+            command=lambda: self.toggle_led_exclusive(led4, "led4_on", self.led4_btn)
+        )
+        self.led4_btn.grid(row=0, column=3, padx=5, pady=5, sticky="ew")
+
         self.led_default_bg = self.led1_btn.cget("bg")
         self.led_default_fg = self.led1_btn.cget("fg")
         self.led_default_bg = self.led2_btn.cget("bg")
         self.led_default_fg = self.led2_btn.cget("fg")
         self.led_default_bg = self.led3_btn.cget("bg")
         self.led_default_fg = self.led3_btn.cget("fg")
+        self.led_default_bg = self.led4_btn.cget("bg")
+        self.led_default_fg = self.led4_btn.cget("fg")
 
 
         # ---- Camera controls ----
@@ -579,10 +593,11 @@ class PeanutApp(tk.Tk):
         led1.off()
         led2.off()
         led3.off()
+        led4.off()
         driver.off()
 
         # Reset state flags
-        self.led1_on = self.led2_on = self.led3_on = False
+        self.led1_on = self.led2_on = self.led3_on = self.led4_on = False
 
         # Reset button appearance if buttons already exist
         if hasattr(self, "led1_btn"):
@@ -591,6 +606,8 @@ class PeanutApp(tk.Tk):
             self.led2_btn.config(bg=self.led_default_bg, fg=self.led_default_fg, text="LED 2")
         if hasattr(self, "led3_btn"):
             self.led3_btn.config(bg=self.led_default_bg, fg=self.led_default_fg, text="LED 3")
+        if hasattr(self, "led4_btn"):
+            self.led4_btn.config(bg=self.led_default_bg, fg=self.led_default_fg, text="LED 4")
 
         self.set_tabs_for_led_test(False)
 
@@ -621,8 +638,10 @@ class PeanutApp(tk.Tk):
                     label = "LED 1"
                 elif target_btn is self.led2_btn:
                     label = "LED 2"
-                else:
+                elif target_btn is self.led3_btn:
                     label = "LED 3"
+                else:
+                    label = "LED 4"
 
                 target_btn.config(bg="#4caf50", fg="white", text=f"{label} (ON)")
                 self.set_status("LED test ON")

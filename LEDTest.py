@@ -16,13 +16,16 @@ DRIVER = 17
 LED1   = 27
 LED2   = 22
 LED3   = 23
+LED4   = 24
 
 # -------- RELAYS --------
 # active_low → relay turns ON when output is LOW
-driver = OutputDevice(DRIVER, active_high=False, initial_value=False)
-led1   = OutputDevice(LED1,   active_high=False, initial_value=False)
-led2   = OutputDevice(LED2,   active_high=False, initial_value=False)
-led3   = OutputDevice(LED3,   active_high=False, initial_value=False)
+driver = OutputDevice(DRIVER, active_high=True, initial_value=False)
+led1   = OutputDevice(LED1,   active_high=True, initial_value=False)
+led2   = OutputDevice(LED2,   active_high=True, initial_value=False)
+led3   = OutputDevice(LED3,   active_high=True, initial_value=False)
+led4   = OutputDevice(LED4,   active_high=True, initial_value=False)
+
 
 leds = [led1, led2, led3]
 
@@ -48,9 +51,10 @@ def main():
     driver.on()
     time.sleep(1)
 
-    turn_on_only(led1, "LED1", 1)
-    turn_on_only(led2, "LED2", 1)
-    turn_on_only(led3, "LED3", 1)
+    turn_on_only(led1, "LED1", 2)
+    turn_on_only(led2, "LED2", 2)
+    turn_on_only(led3, "LED3", 2)
+    turn_on_only(led4, "LED4", 2)
 
     print("[STOP] Turning OFF driver relay...")
     driver.off()
