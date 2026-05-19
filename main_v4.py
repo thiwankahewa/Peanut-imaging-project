@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+
+#integration with shaoqi code
+
 import os
 import platform
 import time
@@ -10,6 +13,12 @@ from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 import numpy as np
 import subprocess
+
+import pickle
+import re
+from pathlib import Path
+from ultralytics import YOLO
+import matplotlib.pyplot as plt
 
 if platform.system() == "Linux":
     from gpiozero import OutputDevice
@@ -32,6 +41,12 @@ IMAGE_DIR = "images"
 os.makedirs(IMAGE_DIR, exist_ok=True)
 CALIB_DIR = "calibration"
 os.makedirs(CALIB_DIR, exist_ok=True)
+ANALYSIS_OUTPUT_DIR = "analysis_outputs"
+os.makedirs(ANALYSIS_OUTPUT_DIR, exist_ok=True)
+
+MODEL_DIR = "models"
+YOLO_SEG_MODEL_PATH = os.path.join(MODEL_DIR, "04_26_26_peanut_seg.pt")
+REG_MODEL_PATH = os.path.join(MODEL_DIR, "pca12_regression_model.pkl")
 
 os.environ["GPIOZERO_PIN_FACTORY"] = "lgpio"   # Force a working GPIO backend
 
@@ -77,6 +92,21 @@ LED_GAIN_DB_CAL = {1: 0.0, 2: 4.5, 3: 1.2}
 
 calibration_flats = {}
 
+analysis_models_loaded = False
+pca_model = None
+reg_model = None
+yolo_model = None
+
+# YOLO / analysis parameters
+
+ANALYSIS_DEVICE = "cpu"        # use "cpu" if CUDA is not available
+ANALYSIS_CONF = 0.25
+ANALYSIS_IOU_THRESH = 0
+ANALYSIS_IMGSZ = 640
+ANALYSIS_MAX_DET = 104
+ANALYSIS_AREA_MIN = 100
+
+
 # ============================================================
 #  CAMERA HELPERS
 # ============================================================
@@ -105,7 +135,6 @@ def reset_camera():
     CAM_OK = False
     CAM_ERROR_MSG = ""
     system = cam_list = cam = processor = None
-
 
 def init_camera():
     global CAM_OK, CAM_ERROR_MSG, system, cam_list, cam, processor
@@ -137,7 +166,6 @@ def init_camera():
         CAM_OK = False
         print(CAM_ERROR_MSG)
 
-
 def reset_usb_camera():
     global USB_CAM_OK, USB_CAM_ERROR_MSG, usb_cam
 
@@ -150,7 +178,6 @@ def reset_usb_camera():
     usb_cam = None
     USB_CAM_OK = False
     USB_CAM_ERROR_MSG = ""
-
 
 def init_usb_camera():
     global USB_CAM_OK, USB_CAM_ERROR_MSG, usb_cam
@@ -201,7 +228,6 @@ def init_usb_camera():
         USB_CAM_OK = False
         print(USB_CAM_ERROR_MSG)
 
-
 def set_led_camera_params(led_id: int):
     if cam is None:
         return
@@ -211,7 +237,6 @@ def set_led_camera_params(led_id: int):
         cam.ExposureTime.SetValue(exp)
     if gain is not None:
         cam.Gain.SetValue(gain)
-
 
 def set_led_camera_cal_params(led_id: int):
     if cam is None:
@@ -250,7 +275,6 @@ def capture_image():
     cam.EndAcquisition()
     return arr[y1:y2, x1:x2]
 
-
 def capture_usb_image():
     global USB_CAM_OK, USB_CAM_ERROR_MSG, usb_cam
 
@@ -280,7 +304,6 @@ def capture_usb_image():
 
     return img_rot
 
-
 def flat_field_normalize(img: np.ndarray, led_id: int):
     """
     Normalize an image using the latest calibration flat for this LED.
@@ -301,10 +324,8 @@ def flat_field_normalize(img: np.ndarray, led_id: int):
     norm = np.clip(norm, 0, 255).astype("uint8")
     return norm, norm_ratio
 
-
 def calib_flat_path_ref(led_id: int) -> str:
     return os.path.join(CALIB_DIR, f"LED{led_id}_flat_ref.npy")
-
 
 def load_calibration_flats():
     global calibration_flats
@@ -319,12 +340,10 @@ def load_calibration_flats():
             except Exception as e:
                 print(f"[Calib] Failed to load flat for LED {led_id}: {e}")
 
-
 def save_calibration_flat(led_id: int, arr: np.ndarray, as_reference_if_missing=True):
     ref_path = calib_flat_path_ref(led_id)
     np.save(ref_path, arr)
     print(f"[Calib] Saved ref flat for LED {led_id} -> {ref_path}")
-
 
 def cleanup_hardware():
     print("[Cleanup] Releasing hardware...")
@@ -374,6 +393,475 @@ def cleanup_hardware():
         pass
 
     print("[Cleanup] GPIO and cameras released.")
+
+
+# -------------------------
+# Utils
+# -------------------------
+def to_uint8(img: np.ndarray) -> np.ndarray:
+    """Convert any numeric image to uint8 using robust percentile scaling."""
+    img = img.astype(np.float32)
+    lo, hi = np.percentile(img, (1, 99))
+    img = np.clip(img, lo, hi)
+    img = (img - lo) / (hi - lo + 1e-8) * 255.0
+    return img.astype(np.uint8)
+
+
+def npy_to_yolo_rgb_u8(data: np.ndarray) -> np.ndarray:
+    """
+    Convert npy cube (H,W,3) -> uint8 RGB image for YOLO inference.
+    Channels are assumed to be [405, 720, 760] -> [R, G, B].
+    """
+    if data.ndim != 3 or data.shape[2] != 3:
+        raise ValueError(f"Expected (H,W,3), got {data.shape}")
+
+    img405 = to_uint8(data[:, :, 0])
+    img720 = to_uint8(data[:, :, 1])
+    img760 = to_uint8(data[:, :, 2])
+
+    rgb = np.stack([img405, img720, img760], axis=2)  # RGB
+    rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
+
+    return rgb
+
+
+def channelwise_minmax_01(pixels: np.ndarray, eps: float = 1e-8) -> np.ndarray:
+    """Normalize pixels channel-wise to 0-1 range."""
+    mn = pixels.min(axis=0)
+    mx = pixels.max(axis=0)
+    return (pixels - mn) / (mx - mn + eps)
+
+
+def draw_label_box(img_bgr: np.ndarray, bbox, text: str):
+    """Draw bounding box and text label on the output image."""
+    x, y, w, h = bbox
+    cv2.rectangle(img_bgr, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+    (tw, th), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 1)
+    y0 = max(0, y - th - baseline - 4)
+    cv2.rectangle(img_bgr, (x, y0), (x + tw + 6, y0 + th + baseline + 4), (0, 255, 0), -1)
+    cv2.putText(img_bgr, text, (x + 3, y0 + th + 2),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 1, cv2.LINE_AA)
+
+
+def visualize_binary_mask(orig_h: int, orig_w: int, instance_masks_01, out_path: str):
+    """Save a union binary mask (255=foreground, 0=background) at original scale."""
+    union = np.zeros((orig_h, orig_w), dtype=np.uint8)
+    for m in instance_masks_01:
+        union = np.maximum(union, (m.astype(np.uint8) * 255))
+    cv2.imwrite(out_path, union)
+
+
+# -------------------------
+# Functions for mask deduplication and refinement
+# -------------------------
+def mask_iou(m1: np.ndarray, m2: np.ndarray) -> float:
+    """Calculate Intersection over Union (IoU) between two binary masks."""
+    a = m1.astype(bool)
+    b = m2.astype(bool)
+    inter = np.logical_and(a, b).sum()
+    if inter == 0:
+        return 0.0
+    union = np.logical_or(a, b).sum()
+    return float(inter) / float(union + 1e-8)
+
+
+def dedup_by_mask_iou(masks01: np.ndarray, scores: np.ndarray = None, iou_thr: float = 0.0):
+    """Remove overlapping masks based on an IoU threshold."""
+    N = masks01.shape[0]
+    if scores is None:
+        order = list(range(N))
+    else:
+        order = list(np.argsort(-scores))  # Sort high to low confidence
+
+    keep = []
+    for i in order:
+        mi = masks01[i]
+        drop = False
+        for j in keep:
+            mj = masks01[j]
+            if mask_iou(mi, mj) > iou_thr:
+                drop = True
+                break
+        if not drop:
+            keep.append(i)
+
+    return sorted(keep)
+
+
+def fill_holes(binary_255: np.ndarray) -> np.ndarray:
+    """Fill holes inside foreground regions in a 0/255 binary image."""
+    h, w = binary_255.shape
+    inv = cv2.bitwise_not(binary_255)
+    ffmask = np.zeros((h + 2, w + 2), np.uint8)
+    cv2.floodFill(inv, ffmask, (0, 0), 0)
+    return cv2.bitwise_or(binary_255, inv)
+
+
+def refine_mask_in_bbox(seg_img_u8: np.ndarray, x: int, y: int, w: int, h: int, pad: int = 2):
+    """Stage-2 refinement: re-segment ONLY within bbox ROI to get a solid mask."""
+    H, W = seg_img_u8.shape
+    x0 = max(0, x - pad)
+    y0 = max(0, y - pad)
+    x1 = min(W, x + w + pad)
+    y1 = min(H, y + h + pad)
+
+    roi = seg_img_u8[y0:y1, x0:x1]
+    roi_blur = cv2.GaussianBlur(roi, (5, 5), 0)
+    _, m = cv2.threshold(roi_blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    if (m.sum() / 255.0) > (m.size * 0.7):
+        m = cv2.bitwise_not(m)
+
+    k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, k_close, iterations=2)
+
+    num, lab, stats, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+    if num > 1:
+        areas = stats[1:, cv2.CC_STAT_AREA]
+        best = 1 + int(np.argmax(areas))
+        m = (lab == best).astype(np.uint8) * 255
+
+    m = fill_holes(m)
+    roi_mask = (m > 0).astype(np.uint8)
+    return roi_mask, x0, y0, x1, y1
+
+
+def refine_yolo_instance_with_760(
+    seg_img_u8: np.ndarray,
+    bbox,
+    yolo_mask01: np.ndarray,
+    pad: int = 5,
+    constrain_with_yolo: bool = True,
+    yolo_dilate_k: int = 7
+) -> np.ndarray:
+    """Refine one YOLO instance mask using the 760nm channel."""
+    x, y, w, h = bbox
+    roi_mask01, x0, y0, x1, y1 = refine_mask_in_bbox(seg_img_u8, x, y, w, h, pad=pad)
+
+    H, W = seg_img_u8.shape
+    refined_full = np.zeros((H, W), dtype=np.uint8)
+    refined_full[y0:y1, x0:x1] = roi_mask01
+
+    if constrain_with_yolo:
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (yolo_dilate_k, yolo_dilate_k))
+        yolo_dil = cv2.dilate((yolo_mask01 * 255).astype(np.uint8), kernel, iterations=1)
+        yolo_dil01 = (yolo_dil > 0).astype(np.uint8)
+        refined_full = (refined_full & yolo_dil01).astype(np.uint8)
+
+    return refined_full
+
+
+# -------------------------
+# YOLO segmentation wrapper
+# -------------------------
+def segment_with_yolo_from_npy(
+    data: np.ndarray,
+    seg_img_u8: np.ndarray,
+    yolo_model: YOLO,
+    device=0,
+    conf=0.25,
+    iou_thresh=0,
+    imgsz=640,
+    max_det=104,
+    retina_masks=True,
+    refine_with_760=True,
+    refine_pad=5,
+    area_min=100
+):
+    """
+    Run YOLO on warped 640x640 image, then map ALL outputs (masks & boxes) 
+    back to the exact ORIGINAL resolution before returning.
+    """
+    # RGB image at original dimensions
+    rgb_orig = npy_to_yolo_rgb_u8(data)
+    orig_h, orig_w = rgb_orig.shape[:2]
+
+    # Explicitly warp the image to match YOLO training dimensions (ignoring aspect ratio)
+    rgb_resized = cv2.resize(rgb_orig, (imgsz, imgsz))
+
+    # Perform YOLO prediction on the 640x640 warped image
+    results = yolo_model.predict(
+        source=rgb_resized,
+        device=device,
+        conf=conf,
+        iou=iou_thresh,
+        imgsz=imgsz,
+        max_det=max_det,
+        retina_masks=retina_masks,
+        verbose=False
+    )
+
+    r = results[0]
+    instance_masks_orig_scale = []
+    bboxes_orig_scale = []
+
+    # If no detections occur
+    if r.masks is None or r.boxes is None or len(r.boxes) == 0:
+        return instance_masks_orig_scale, bboxes_orig_scale, rgb_orig
+
+    # Extract masks and boxes (these correspond to the 640x640 warped space)
+    masks_np = r.masks.data.detach().cpu().numpy()  
+    boxes_np = r.boxes.xyxy.detach().cpu().numpy()  
+
+    # Threshold masks to binary 0/1
+    masks01 = (masks_np > 0.5).astype(np.uint8)
+
+    # Get confidence scores for deduplication
+    try:
+        confs = r.boxes.conf.detach().cpu().numpy()
+    except Exception:
+        confs = None
+
+    # Mask-level NMS by IoU
+    keep_idx = dedup_by_mask_iou(masks01, scores=confs, iou_thr=iou_thresh)
+
+    # Filtered arrays
+    masks_filtered = masks_np[keep_idx]
+    boxes_filtered = boxes_np[keep_idx]
+
+    # Calculate ratios to map coordinates back to the ORIGINAL dimensions
+    scale_x = orig_w / imgsz
+    scale_y = orig_h / imgsz
+
+    for i in range(masks_filtered.shape[0]):
+        m = masks_filtered[i]
+        
+        # MAPPING BACK MASK: Resize the mask back to original space
+        m_orig_size = cv2.resize(m, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
+        m01 = (m_orig_size > 0.5).astype(np.uint8)
+
+        # MAPPING BACK BBOX: Scale coordinates back to original space
+        x1, y1, x2, y2 = boxes_filtered[i]
+        x1 = int(np.clip(np.floor(x1 * scale_x), 0, orig_w - 1))
+        y1 = int(np.clip(np.floor(y1 * scale_y), 0, orig_h - 1))
+        x2 = int(np.clip(np.ceil(x2 * scale_x), 0, orig_w - 1))
+        y2 = int(np.clip(np.ceil(y2 * scale_y), 0, orig_h - 1))
+
+        bbox_orig = (x1, y1, max(1, x2 - x1), max(1, y2 - y1))
+
+        # Refine the re-scaled mask against the original 760nm channel
+        if refine_with_760:
+            final_m01 = refine_yolo_instance_with_760(
+                seg_img_u8=seg_img_u8,
+                bbox=bbox_orig,
+                yolo_mask01=m01,
+                pad=refine_pad,
+                constrain_with_yolo=True, 
+                yolo_dilate_k=7
+            )
+        else:
+            final_m01 = m01
+
+        # Skip peanuts that are too small
+        if final_m01.sum() < area_min:
+            continue
+
+        instance_masks_orig_scale.append(final_m01)
+        bboxes_orig_scale.append(bbox_orig)
+
+    # Return lists holding data entirely mapped back to original resolution
+    return instance_masks_orig_scale, bboxes_orig_scale, rgb_orig
+
+
+# -------------------------
+# Main workflow
+# -------------------------
+def process_one_cube(data: np.ndarray, stem: str, pca_model, reg_model, yolo_model: YOLO, out_dir: str,
+                     normalize_pixels=True,
+                     device=0, conf=0.2, iou_thresh=0, imgsz=640, max_det=104, area_min=100):
+    
+    os.makedirs(out_dir, exist_ok=True)
+
+    fname = f"{stem}.npy"
+
+    # 1. Use captured 3-channel cube
+    if data.ndim != 3 or data.shape[2] != 3:
+        raise ValueError(f"Expected (H,W,3), got {data.shape} for {fname}")
+
+    img405 = data[:, :, 0]
+    img720 = data[:, :, 1]
+    img760 = data[:, :, 2]
+
+    # Original dimension 760nm image for background / mask refinement
+    seg_img_orig_scale = to_uint8(img760)
+
+    # 2. YOLO Segmentation (internally resizes to 640x640, predicts, then maps EVERYTHING back to original scale)
+    instance_masks_orig, bboxes_orig, rgb_orig = segment_with_yolo_from_npy(
+        data=data,
+        seg_img_u8=seg_img_orig_scale,
+        yolo_model=yolo_model,
+        device=device,
+        conf=conf,
+        iou_thresh=iou_thresh,
+        imgsz=imgsz,
+        max_det=max_det,
+        retina_masks=True,
+        refine_with_760=True,
+        refine_pad=5,
+        area_min=area_min
+    )
+
+    orig_h, orig_w = rgb_orig.shape[:2]
+    
+    # Base image for final visualizations (guaranteed to be original resolution)
+    annotated = cv2.cvtColor(seg_img_orig_scale, cv2.COLOR_GRAY2BGR)
+
+    peanut_preds = []
+
+    # Array to store the continuous maturity map at original resolution
+    maturity_map_orig = np.full((orig_h, orig_w), np.nan)
+
+    for mask01, bbox in zip(instance_masks_orig, bboxes_orig):
+        # 5-pixel mask erosion to drop noisy edge pixels
+        kernel = np.ones((5, 5), np.uint8)
+        mask_eroded = cv2.erode(mask01.astype(np.uint8), kernel, iterations=1).astype(bool)
+        
+        # Fallback to the original mask if erosion erases the peanut completely
+        if mask_eroded.sum() < 10:
+            mask_eroded = mask01.astype(bool)
+
+        if mask_eroded.sum() < 10:
+            continue
+
+        # Extract pixels directly from the original un-resized spectral bands
+        pixels = np.stack([img405[mask_eroded], img720[mask_eroded], img760[mask_eroded]], axis=1).astype(np.float32)
+
+        if normalize_pixels:
+            pixels = channelwise_minmax_01(pixels)
+
+        # 3. PCA Projection & Regression
+        pc_scores = pca_model.transform(pixels)
+        pc12_scores = pc_scores[:, :2] 
+        
+        y_pred_pix = reg_model.predict(pc12_scores)
+        y_pred_pix = np.clip(y_pred_pix, 0, 1)
+
+        # Populate the original-scale continuous maturity map
+        maturity_map_orig[mask_eroded] = y_pred_pix
+
+        # Calculate average maturity for the whole peanut instance
+        y_mean = float(np.mean(y_pred_pix))
+        peanut_preds.append(y_mean)
+
+        # Draw box and the CONTINUOUS MATURITY INDEX label on original-scale image
+        draw_label_box(annotated, bbox, f"{y_mean:.2f}")
+
+    # 4. Save Outputs (All in original dimensions)
+    binary_mask_path = os.path.join(out_dir, f"{stem}_binary_mask.png")
+    visualize_binary_mask(orig_h, orig_w, instance_masks_orig, binary_mask_path)
+
+    annotated_path = os.path.join(out_dir, f"{stem}_annotated.png")
+    cv2.imwrite(annotated_path, annotated)
+
+    # Save Continuous Maturity Map Heatmap
+    plt.figure(figsize=(8,6))
+    cmap = plt.cm.jet.copy()
+    cmap.set_bad(color='lightgray')  
+    
+    plt.imshow(maturity_map_orig, cmap=cmap, vmin=0, vmax=1)
+    plt.colorbar(label="Maturity Index (0-1)")
+    plt.title("Peanut Continuous Maturity Map")
+    plt.axis('off')
+    
+    heatmap_path = os.path.join(out_dir, f"{stem}_maturity_heatmap.png")
+    plt.savefig(heatmap_path, bbox_inches='tight', dpi=300)
+    plt.close()
+
+    # Terminal summary logic using continuous indexes directly
+    n_peanuts = len(peanut_preds)
+    summary_lines = []
+    summary_lines.append(f"File: {fname}")
+    summary_lines.append(f"Original Resolution: {orig_w}x{orig_h}")
+    summary_lines.append(f"Peanut number: {n_peanuts}")
+
+    if n_peanuts == 0:
+        summary_lines.append("No peanuts detected.")
+    else:
+        mean_maturity = float(np.mean(peanut_preds))
+        std_maturity = float(np.std(peanut_preds))
+        summary_lines.append(f"Mean predicted maturity index (0~1): {mean_maturity:.3f}")
+        summary_lines.append(f"Std predicted maturity index (0~1): {std_maturity:.3f}")
+
+        days_left = 17 
+        summary_lines.append(
+            f"According to the peanut maturity board, this batch of peanuts still has "
+            f"approximately {days_left} days until digging."
+        )
+
+    summary_txt = "\n".join(summary_lines)
+    print("\n" + "=" * 60)
+    print(summary_txt)
+    print("=" * 60 + "\n")
+
+    result = {
+        "file": fname,
+        "n_peanuts": n_peanuts,
+        "peanut_preds": peanut_preds,
+        "mean_maturity": float(np.mean(peanut_preds)) if n_peanuts else None,
+        "std_maturity": float(np.std(peanut_preds)) if n_peanuts else None,
+        "days_left": 17 if n_peanuts else None,
+        "binary_mask_path": binary_mask_path,
+        "annotated_path": annotated_path,
+        "heatmap_path": heatmap_path,
+    }
+    return result
+
+
+def process_one_npy(npy_path: str, pca_model, reg_model, yolo_model: YOLO, out_dir: str,
+                    normalize_pixels=True,
+                    device=0, conf=0.2, iou_thresh=0, imgsz=640, max_det=104, area_min=100):
+    """Compatibility wrapper for processing an existing .npy cube from disk."""
+    data = np.load(npy_path)
+    stem = os.path.splitext(os.path.basename(npy_path))[0]
+    return process_one_cube(
+        data=data,
+        stem=stem,
+        pca_model=pca_model,
+        reg_model=reg_model,
+        yolo_model=yolo_model,
+        out_dir=out_dir,
+        normalize_pixels=normalize_pixels,
+        device=device,
+        conf=conf,
+        iou_thresh=iou_thresh,
+        imgsz=imgsz,
+        max_det=max_det,
+        area_min=area_min,
+    )
+
+
+
+# -------------------------
+# Analysis model loading
+# -------------------------
+def load_analysis_models():
+    """Load YOLO segmentation model and PCA-regression model once."""
+    global analysis_models_loaded, pca_model, reg_model, yolo_model
+
+    if analysis_models_loaded:
+        return
+
+    if not os.path.exists(YOLO_SEG_MODEL_PATH):
+        raise FileNotFoundError(
+            f"YOLO model not found: {YOLO_SEG_MODEL_PATH}. "
+            "Update YOLO_SEG_MODEL_PATH or place the model file in the models folder."
+        )
+
+    if not os.path.exists(REG_MODEL_PATH):
+        raise FileNotFoundError(
+            f"PCA-regression model not found: {REG_MODEL_PATH}. "
+            "Update REG_MODEL_PATH or place the .pkl file in the models folder."
+        )
+
+    with open(REG_MODEL_PATH, "rb") as f:
+        maturity_model_dict = pickle.load(f)
+
+    pca_model = maturity_model_dict["pca"]
+    reg_model = maturity_model_dict["reg"]
+    yolo_model = YOLO(YOLO_SEG_MODEL_PATH)
+
+    analysis_models_loaded = True
 
 
 # ============================================================
@@ -487,10 +975,10 @@ class PeanutApp(tk.Tk):
             right_cap.rowconfigure(r, weight=1)
 
         self.total_var = tk.StringVar(value="Total peanuts: -")
-        self.black_var = tk.StringVar(value="Black: -")
-        self.brown_var = tk.StringVar(value="Brown: -")
-        self.yellow_var = tk.StringVar(value="Yellow: -")
-        self.white_var = tk.StringVar(value="White: -")
+        self.black_var = tk.StringVar(value="Mean maturity index: -")
+        self.brown_var = tk.StringVar(value="Std maturity index: -")
+        self.yellow_var = tk.StringVar(value="Estimated days to digging: -")
+        self.white_var = tk.StringVar(value="Output: -")
 
         ttk.Label(right_cap, textvariable=self.total_var).grid(row=0, column=0, sticky="w", padx=10, pady=2)
         ttk.Label(right_cap, textvariable=self.black_var).grid(row=1, column=0, sticky="w", padx=10, pady=2)
@@ -619,6 +1107,20 @@ class PeanutApp(tk.Tk):
 
     def safe_progress(self, value: float):
         self.after(0, lambda: self.set_progress(value))
+
+    def safe_update_results(self, result: dict):
+        def _update():
+            n = result.get("n_peanuts", 0)
+            mean = result.get("mean_maturity")
+            std = result.get("std_maturity")
+            days = result.get("days_left")
+
+            self.total_var.set(f"Total peanuts: {n}")
+            self.black_var.set(f"Mean maturity index: {mean:.3f}" if mean is not None else "Mean maturity index: -")
+            self.brown_var.set(f"Std maturity index: {std:.3f}" if std is not None else "Std maturity index: -")
+            self.yellow_var.set(f"Estimated days to digging: {days}" if days is not None else "Estimated days to digging: -")
+            self.white_var.set(f"Output: {os.path.basename(result.get('annotated_path', '-'))}")
+        self.after(0, _update)
 
     def safe_capture_end(self):
         def _end():
@@ -883,7 +1385,7 @@ class PeanutApp(tk.Tk):
             # FLIR captures with LED1-3
             # ---------------------------------------------------
             leds = [(1, led1), (2, led2), (3, led3)]
-
+            band_imgs = {}
             timestamp = time.strftime("%Y%m%d-%H%M%S")
 
             for idx, (i, led_dev) in enumerate(leds, start=1):
@@ -910,6 +1412,7 @@ class PeanutApp(tk.Tk):
                 norm_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED{i}_norm.png")
                 norm_ratio_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED{i}_ratio.npy")
 
+                band_imgs[i] = img_norm
                 cv2.imwrite(raw_name, img)
                 cv2.imwrite(norm_name, img_norm)
 
@@ -918,6 +1421,48 @@ class PeanutApp(tk.Tk):
 
                 progress = idx / total_steps * 100.0
                 self.safe_progress(progress)
+            
+            # Build 3-channel cube: [LED1/405, LED2/720, LED3/760].
+            # This is the input used by the YOLO + PCA/regression maturity analysis.
+            missing = [i for i in (1, 2, 3) if i not in band_imgs]
+            if missing:
+                raise RuntimeError(f"Missing captured band(s): {missing}")
+
+            cube = np.dstack([band_imgs[1], band_imgs[2], band_imgs[3]])
+            cube_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED123_cube.npy")
+            pseudo_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED123_pseudo.png")
+            np.save(cube_name, cube.astype(np.float32))
+            cv2.imwrite(pseudo_name, cube)
+
+            # ---------------------------------------------------
+            # Run segmentation + maturity analysis on LED1-3 cube
+            # ---------------------------------------------------
+            try:
+                self.safe_status("Analyzing peanut maturity...")
+                load_analysis_models()
+
+                result = process_one_cube(
+                    data=cube.astype(np.float32),
+                    stem=f"{timestamp}_LED123_cube",
+                    pca_model=pca_model,
+                    reg_model=reg_model,
+                    yolo_model=yolo_model,
+                    out_dir=ANALYSIS_OUTPUT_DIR,
+                    normalize_pixels=True,
+                    device=ANALYSIS_DEVICE,
+                    conf=ANALYSIS_CONF,
+                    iou_thresh=ANALYSIS_IOU_THRESH,
+                    imgsz=ANALYSIS_IMGSZ,
+                    max_det=ANALYSIS_MAX_DET,
+                    area_min=ANALYSIS_AREA_MIN,
+                )
+                self.safe_update_results(result)
+                print("[Analysis] Result:", result)
+
+            except Exception as e:
+                # Capture should still continue even if analysis models are missing/fail.
+                print("[Analysis] Skipped/failed:", e)
+                self.safe_status(f"Capture OK, analysis skipped: {e}")
 
             # ---------------------------------------------------
             # USB reference capture with LED4
