@@ -1,6 +1,6 @@
 import cv2
 
-IMG_PATH = "/home/thiwa/Peanut-imaging-project/images/20260518-104629_LED4.png" 
+IMG_PATH = "reference.png" 
 img = cv2.imread(IMG_PATH, cv2.IMREAD_UNCHANGED)
 
 if img is None:

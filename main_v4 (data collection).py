@@ -64,6 +64,7 @@ USB_CAM_HEIGHT = 1080
 USB_CAM_AUTO_EXPOSURE = 1   # manual exposure mode for best preview
 USB_CAM_GAMMA = 144
 USB_CAM_GAIN = 0
+PEANUT_COLOR_OPTIONS = ["black", "brown", "orange", "yellow", "white", "mix"]
 
 # --- Initialize relays ---
 driver = OutputDevice(DRIVER_PIN, active_high=True, initial_value=False)
@@ -920,6 +921,7 @@ class PeanutApp(tk.Tk):
         # Tk variables
         self.progress_var = tk.DoubleVar(value=0.0)
         self.status_var = tk.StringVar(value="Idle")
+        self.peanut_color_var = tk.StringVar(value=PEANUT_COLOR_OPTIONS[0])
 
         self._create_style()
         self._create_widgets()
@@ -960,8 +962,10 @@ class PeanutApp(tk.Tk):
         left_cap = ttk.Frame(self.tab_capture)
         left_cap.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
         left_cap.columnconfigure(0, weight=1)
-        left_cap.rowconfigure(0, weight=1)
-        left_cap.rowconfigure(1, weight=1)
+        left_cap.rowconfigure(0, weight=0)
+        left_cap.rowconfigure(1, weight=0)
+        left_cap.rowconfigure(2, weight=0)
+        left_cap.rowconfigure(3, weight=1)
 
         header_lbl = ttk.Label(
             left_cap,
@@ -970,13 +974,28 @@ class PeanutApp(tk.Tk):
         )
         header_lbl.grid(row=0, column=0, pady=(0, 10), sticky="n")
 
+        color_frame = ttk.Frame(left_cap)
+        color_frame.grid(row=1, column=0, pady=(0, 10), sticky="ew")
+        color_frame.columnconfigure(0, weight=0)
+        color_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(color_frame, text="Peanut color:", font=("Helvetica", 10)).grid(row=0, column=0, sticky="w", padx=(0, 5))
+        self.color_select = ttk.Combobox(
+            color_frame,
+            values=PEANUT_COLOR_OPTIONS,
+            textvariable=self.peanut_color_var,
+            state="readonly",
+            font=("Helvetica", 10)
+        )
+        self.color_select.grid(row=0, column=1, sticky="ew")
+
         self.start_btn = ttk.Button(
             left_cap,
             text="START",
             style="Start.TButton",
             command=self.on_start_capture
         )
-        self.start_btn.grid(row=1, column=0, pady=10, ipadx=10, ipady=10, sticky="n")
+        self.start_btn.grid(row=2, column=0, pady=10, ipadx=10, ipady=10, sticky="n")
 
         self.progress_bar = ttk.Progressbar(
             self.tab_capture,
@@ -1379,6 +1398,13 @@ class PeanutApp(tk.Tk):
             ):
                 return
 
+        if not self.peanut_color_var.get() or self.peanut_color_var.get() not in PEANUT_COLOR_OPTIONS:
+            messagebox.showerror(
+                "Color selection required",
+                "Please select a peanut color before starting capture."
+            )
+            return
+
         messagebox.showinfo(
             "Prepare Peanut Tray",
             "Insert the peanut tray with peanuts.\n"
@@ -1426,10 +1452,11 @@ class PeanutApp(tk.Tk):
                     continue
 
                 img_norm, norm_ratio = flat_field_normalize(img, i)
+                peanut_color = self.peanut_color_var.get()
 
-                raw_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED{i}_raw_.png")
-                norm_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED{i}_norm.png")
-                norm_ratio_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED{i}_ratio.npy")
+                raw_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED{i}_raw_{peanut_color}.png")
+                norm_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED{i}_norm_{peanut_color}.png")
+                norm_ratio_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED{i}_ratio_{peanut_color}.npy")
 
                 band_imgs[i] = img_norm
                 cv2.imwrite(raw_name, img)
@@ -1447,9 +1474,10 @@ class PeanutApp(tk.Tk):
             if missing:
                 raise RuntimeError(f"Missing captured band(s): {missing}")
 
+            peanut_color = self.peanut_color_var.get()
             cube = np.dstack([band_imgs[1], band_imgs[2], band_imgs[3]])
-            cube_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED123_cube.npy")
-            pseudo_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED123_pseudo.png")
+            cube_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED123_cube_{peanut_color}.npy")
+            pseudo_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED123_pseudo_{peanut_color}.png")
             np.save(cube_name, cube.astype(np.float32))
             cv2.imwrite(pseudo_name, cube)
 
@@ -1462,7 +1490,7 @@ class PeanutApp(tk.Tk):
 
                 result = process_one_cube(
                     data=cube.astype(np.float32),
-                    stem=f"{timestamp}_LED123_cube",
+                    stem=f"{timestamp}_LED123_cube_{peanut_color}",
                     pca_model=pca_model,
                     reg_model=reg_model,
                     yolo_model=yolo_model,
@@ -1499,7 +1527,7 @@ class PeanutApp(tk.Tk):
             driver.off()
             time.sleep(0.2)
             
-            led4_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED4.png")
+            led4_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED4_{peanut_color}.png")
             cv2.imwrite(led4_name, usb_img)
 
             self.safe_progress(100.0)
