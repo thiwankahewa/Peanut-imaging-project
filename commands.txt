@@ -3,3 +3,9 @@ pip install -r requirements.txt
 
 v4l2-ctl -d /dev/video0 --list-formats-ext
 v4l2-ctl -d /dev/video0 --get-fmt-video
+
+
+
+
+nano ~/.config/autostart/peanut-imager.desktop
+X-GNOME-Autostart-enabled=true

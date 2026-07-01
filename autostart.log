@@ -1,0 +1,50 @@
+Starting Peanut GUI at 2026-06-30 20:15:57
+Activated virtualenv: /home/thiwa/Peanut-imaging-project/.venv/bin/python
+/home/thiwa/Peanut-imaging-project/main_v5.py:786: UserWarning: Starting a Matplotlib GUI outside of the main thread will likely fail.
+  plt.figure(figsize=(8,6))
+Exception in Tkinter callback
+Traceback (most recent call last):
+  File "/home/thiwa/Peanut-imaging-project/main_v5.py", line 1660, in show_latest_heatmap_preview
+    self.heatmap_preview_label.config(image=self.latest_heatmap_photo, text="")
+  File "/usr/lib/python3.10/tkinter/__init__.py", line 2386, in __getattr__
+    return getattr(self.tk, attr)
+AttributeError: '_tkinter.tkapp' object has no attribute 'heatmap_preview_label'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/lib/python3.10/tkinter/__init__.py", line 1924, in __call__
+    return self.func(*args)
+  File "/usr/lib/python3.10/tkinter/__init__.py", line 842, in callit
+    func(*args)
+  File "/home/thiwa/Peanut-imaging-project/main_v5.py", line 1203, in _update
+    self.show_latest_heatmap_preview(self.latest_heatmap_path)
+  File "/home/thiwa/Peanut-imaging-project/main_v5.py", line 1662, in show_latest_heatmap_preview
+    self.heatmap_preview_label.config(text=f"Error loading heatmap:\n{e}")
+  File "/usr/lib/python3.10/tkinter/__init__.py", line 2386, in __getattr__
+    return getattr(self.tk, attr)
+AttributeError: '_tkinter.tkapp' object has no attribute 'heatmap_preview_label'
+[Init] FLIR camera init OK
+[Init] Setting up USB camera ...
+[USB] Actual resolution: 1920 x 1080
+[USB] Actual FOURCC    : MJPG
+[Init] USB camera init OK
+[Calib] Loaded reference flat for LED 1 from calibration/LED1_flat_ref.npy
+[Calib] Loaded reference flat for LED 2 from calibration/LED2_flat_ref.npy
+[Calib] Loaded reference flat for LED 3 from calibration/LED3_flat_ref.npy
+
+============================================================
+File: 20260701-083422_LED123_cube.npy
+Original Resolution: 1659x1223
+Peanut number: 11
+Mean predicted maturity index (0~1): 0.399
+Std predicted maturity index (0~1): 0.156
+According to the peanut maturity board, this batch of peanuts still has approximately 17 days until digging.
+============================================================
+
+[Analysis] Result: {'file': '20260701-083422_LED123_cube.npy', 'n_peanuts': 11, 'peanut_preds': [0.3477826714515686, 0.2562289535999298, 0.2565203011035919, 0.2903291881084442, 0.18913277983665466, 0.38239023089408875, 0.4745386242866516, 0.3239940404891968, 0.5622149705886841, 0.6493217945098877, 0.6598863005638123], 'mean_maturity': 0.3993036232211373, 'std_maturity': 0.15612625538728425, 'days_left': 17, 'binary_mask_path': 'analysis_outputs/20260701-083422_LED123_cube_binary_mask.png', 'annotated_path': 'analysis_outputs/20260701-083422_LED123_cube_annotated.png', 'heatmap_path': 'analysis_outputs/20260701-083422_LED123_cube_maturity_heatmap.png'}
+[LED4] frame mean = 85.52011140046297
+[Cleanup] Releasing hardware...
+[Cleanup] GPIO and cameras released.
+terminate called after throwing an instance of 'Spinnaker::Exception'
+  what():  Spinnaker: Can't clear a camera because something still holds a reference to the camera [-1004]
