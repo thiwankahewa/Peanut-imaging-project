@@ -61,7 +61,7 @@ LED4_PIN   = 24
 USB_CAM_INDEX = 0
 USB_CAM_WIDTH = 1920
 USB_CAM_HEIGHT = 1080
-USB_CAM_AUTO_EXPOSURE = 1   # manual exposure mode for best preview
+USB_CAM_AUTO_EXPOSURE = 3   # manual exposure mode for best preview
 USB_CAM_GAMMA = 144
 USB_CAM_GAIN = 0
 
@@ -85,7 +85,7 @@ USB_CAM_OK = False
 USB_CAM_ERROR_MSG = ""
 usb_cam = None
 
-TRAY_ROI = (250, 168,1909, 1391)
+TRAY_ROI = (247, 125,1917, 1430)
 USB_TRAY_ROI = (216, 663, 858, 1519)
 
 LED_EXPOSURE_US = {1: 17887.0, 2: 16000.0, 3: 11000.0, 4: 10000.0}
@@ -1484,6 +1484,7 @@ class PeanutApp(tk.Tk):
             # ---------------------------------------------------
             leds = [(1, led1), (2, led2), (3, led3)]
             band_imgs = {}
+            band_ratios = {}
             timestamp = time.strftime("%Y%m%d-%H%M%S")
 
             suffix = self.get_data_collection_suffix()
@@ -1512,6 +1513,8 @@ class PeanutApp(tk.Tk):
                 norm_ratio_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED{i}_ratio{suffix}.npy")
 
                 band_imgs[i] = img_norm
+                if norm_ratio is not None:
+                    band_ratios[i] = norm_ratio.astype(np.float32)
                 cv2.imwrite(raw_name, img)
                 cv2.imwrite(norm_name, img_norm)
 
@@ -1527,11 +1530,19 @@ class PeanutApp(tk.Tk):
             if missing:
                 raise RuntimeError(f"Missing captured band(s): {missing}")
 
-            cube = np.dstack([band_imgs[1], band_imgs[2], band_imgs[3]])
+            missing_ratios = [i for i in (1, 2, 3) if i not in band_ratios]
+            if missing_ratios:
+                raise RuntimeError(f"Missing calibration ratio(s) for LED band(s): {missing_ratios}")
+
+            # Preserve the ratio representation used by the original training data.
+            cube = np.dstack([band_ratios[1], band_ratios[2], band_ratios[3]])
+            pseudo = np.dstack([band_imgs[1], band_imgs[2], band_imgs[3]])
             cube_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED123_cube{suffix}.npy")
+            pseudo_cube_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED123_pseudo_cube{suffix}.npy")
             pseudo_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED123_pseudo{suffix}.png")
-            np.save(cube_name, cube.astype(np.float32))
-            cv2.imwrite(pseudo_name, cube)
+            np.save(cube_name, cube)
+            np.save(pseudo_cube_name, pseudo)
+            cv2.imwrite(pseudo_name, pseudo)
 
             # ---------------------------------------------------
             # Run segmentation + maturity analysis on LED1-3 cube

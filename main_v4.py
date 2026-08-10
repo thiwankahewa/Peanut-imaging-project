@@ -1405,6 +1405,7 @@ class PeanutApp(tk.Tk):
             # ---------------------------------------------------
             leds = [(1, led1), (2, led2), (3, led3)]
             band_imgs = {}
+            band_ratios = {}
             timestamp = time.strftime("%Y%m%d-%H%M%S")
 
             for idx, (i, led_dev) in enumerate(leds, start=1):
@@ -1432,6 +1433,8 @@ class PeanutApp(tk.Tk):
                 norm_ratio_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED{i}_ratio.npy")
 
                 band_imgs[i] = img_norm
+                if norm_ratio is not None:
+                    band_ratios[i] = norm_ratio.astype(np.float32)
                 cv2.imwrite(raw_name, img)
                 cv2.imwrite(norm_name, img_norm)
 
@@ -1447,11 +1450,19 @@ class PeanutApp(tk.Tk):
             if missing:
                 raise RuntimeError(f"Missing captured band(s): {missing}")
 
-            cube = np.dstack([band_imgs[1], band_imgs[2], band_imgs[3]])
+            missing_ratios = [i for i in (1, 2, 3) if i not in band_ratios]
+            if missing_ratios:
+                raise RuntimeError(f"Missing calibration ratio(s) for LED band(s): {missing_ratios}")
+
+            # Preserve the ratio representation used by the original training data.
+            cube = np.dstack([band_ratios[1], band_ratios[2], band_ratios[3]])
+            pseudo = np.dstack([band_imgs[1], band_imgs[2], band_imgs[3]])
             cube_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED123_cube.npy")
+            pseudo_cube_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED123_pseudo_cube.npy")
             pseudo_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED123_pseudo.png")
-            np.save(cube_name, cube.astype(np.float32))
-            cv2.imwrite(pseudo_name, cube)
+            np.save(cube_name, cube)
+            np.save(pseudo_cube_name, pseudo)
+            cv2.imwrite(pseudo_name, pseudo)
 
             # ---------------------------------------------------
             # Run segmentation + maturity analysis on LED1-3 cube
