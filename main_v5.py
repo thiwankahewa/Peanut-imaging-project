@@ -1536,12 +1536,12 @@ class PeanutApp(tk.Tk):
 
             # Preserve the ratio representation used by the original training data.
             cube = np.dstack([band_ratios[1], band_ratios[2], band_ratios[3]])
-            pseudo = np.dstack([band_imgs[1], band_imgs[2], band_imgs[3]])
-            cube_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED123_cube{suffix}.npy")
-            pseudo_cube_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED123_pseudo_cube{suffix}.npy")
+            pseudo = np.dstack([band_imgs[3], band_imgs[2], band_imgs[1]])
+            # Use the legacy filename for the ratio stack. Keep the uint8
+            # normalized visualization clearly identified as the pseudo cube.
+            cube_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED123{suffix}.npy")
             pseudo_name = os.path.join(IMAGE_DIR, f"{timestamp}_LED123_pseudo{suffix}.png")
             np.save(cube_name, cube)
-            np.save(pseudo_cube_name, pseudo)
             cv2.imwrite(pseudo_name, pseudo)
 
             # ---------------------------------------------------
@@ -1553,7 +1553,7 @@ class PeanutApp(tk.Tk):
 
                 result = process_one_cube(
                     data=cube.astype(np.float32),
-                    stem=f"{timestamp}_LED123_cube{suffix}",
+                    stem=f"{timestamp}_LED123{suffix}",
                     pca_model=pca_model,
                     reg_model=reg_model,
                     yolo_model=yolo_model,
