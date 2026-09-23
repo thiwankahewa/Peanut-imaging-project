@@ -8,3 +8,8 @@ tk==0.1.0
 
 ./spinnaker/spinnaker_python-4.3.0.189-cp310-cp310-linux_aarch64.whl ; platform_system == "Linux" and platform_machine == "aarch64"
 spinnaker-python @ file:spinnaker/spinnaker_python-4.2.0.88-cp310-cp310-win_amd64.whl; platform_system == "Windows" and platform_machine == "AMD64"
+# Maturity inference and plotting (versions validated with the supplied models).
+matplotlib==3.10.9
+scipy==1.15.3
+scikit-learn==1.7.2
+ultralytics==8.4.51
