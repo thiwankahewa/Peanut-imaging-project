@@ -59,7 +59,7 @@ ARTICLE_DEFAULTS = {
     "iou_threshold": 0.00,
     "image_size": 640,
     "raw_max_detections": 300,
-    "minimum_raw_mask_pixels": 30,
+    "minimum_raw_mask_pixels": 500,
     "explicit_duplicate_iou_threshold": 0.80,
     "duplicate_containment_threshold": 0.90,
     "maximum_instances_after_deduplication": 104,

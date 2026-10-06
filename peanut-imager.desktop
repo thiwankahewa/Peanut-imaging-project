@@ -1,6 +1,10 @@
 [Desktop Entry]
 Type=Application
 Name=Peanut Imaging GUI
-Exec=/home/thiwa/Desktop/Peanut-imaging-project/run_peanut_gui.sh
+Comment=Launch Peanut Imaging v7 when the desktop starts
+Exec=/bin/bash /home/thiwa/Peanut-imaging-project/run_peanut_gui.sh
+Path=/home/thiwa/Peanut-imaging-project
 Terminal=false
+Hidden=false
+NoDisplay=false
 X-GNOME-Autostart-enabled=true

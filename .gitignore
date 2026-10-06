@@ -4,3 +4,6 @@ images/
 reference.png
 models/
 analysis_outputs/
+
+# Local Developer mode password hash
+config/developer_password.json

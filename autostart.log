@@ -1,14 +1,10 @@
-Starting Peanut GUI at 2026-09-09 17:44:55
+Starting Peanut GUI at 2026-10-06 18:03:03
 Activated virtualenv: /home/thiwa/Peanut-imaging-project/.venv/bin/python
 [Init] FLIR camera init OK
 [Init] Setting up USB camera ...
 [USB] Actual resolution: 1920 x 1080
 [USB] Actual FOURCC    : MJPG
 [Init] USB camera init OK
-[Calib] Loaded reference flat for LED 1 from calibration/LED1_flat_ref.npy
-[Calib] Loaded reference flat for LED 2 from calibration/LED2_flat_ref.npy
-[Calib] Loaded reference flat for LED 3 from calibration/LED3_flat_ref.npy
-[Cleanup] Releasing hardware...
-[Cleanup] GPIO and cameras released.
-terminate called after throwing an instance of 'Spinnaker::Exception'
-  what():  Spinnaker: Can't clear a camera because something still holds a reference to the camera [-1004]
+[Calib] Loaded reference flat for LED 1 from /home/thiwa/Peanut-imaging-project/calibration/LED1_flat_ref.npy
+[Calib] Loaded reference flat for LED 2 from /home/thiwa/Peanut-imaging-project/calibration/LED2_flat_ref.npy
+[Calib] Loaded reference flat for LED 3 from /home/thiwa/Peanut-imaging-project/calibration/LED3_flat_ref.npy

@@ -1,0 +1,2 @@
+# Install into the existing imaging environment.
+customtkinter==5.2.2
